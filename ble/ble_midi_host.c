@@ -114,11 +114,56 @@ static void att_err(bleh_t *h, unsigned op, unsigned hd, unsigned code)
     att_send(h, r, 5);
 }
 
+/* Decode complete short MIDI messages from a BLE-MIDI characteristic write.
+ * Each event has a timestamp-low byte; a channel status may be omitted under
+ * running status. SysEx is deliberately ignored by this small host. */
+static void midi_write(bleh_t *h, const uint8_t *p, unsigned n)
+{
+    unsigned i = 1;
+    uint8_t running = h->in_running;
+    if (n < 3 || !(p[0] & 0x80u)) return;
+    while (i < n) {
+        bleh_msg_t m;
+        unsigned need, j;
+        uint8_t first, status;
+        if (!(p[i] & 0x80u)) break;
+        m.ts = (uint16_t)(((p[0] & 0x3Fu) << 7) | (p[i++] & 0x7Fu));
+        if (i >= n) break;
+        first = p[i];
+        status = (first & 0x80u) ? first : running;
+        if (!status) break;
+        if (status < 0xF0u) {
+            need = (status & 0xF0u) == 0xC0u || (status & 0xF0u) == 0xD0u ? 2u : 3u;
+            running = status;
+        } else if (status >= 0xF8u) {
+            need = 1u;
+        } else {
+            running = 0;
+            break;
+        }
+        m.b[0] = status;
+        m.len = (uint8_t)need;
+        if (first & 0x80u) i++;
+        for (j = 1; j < need; j++) {
+            if (i >= n || (p[i] & 0x80u)) break;
+            m.b[j] = p[i++];
+        }
+        if (j != need) break;
+        if ((uint8_t)(h->in_w - h->in_r) < BLEH_MIDIQ)
+            h->in_q[h->in_w++ % BLEH_MIDIQ] = m;
+    }
+    h->in_running = running;
+}
+
 static void att_in(bleh_t *h, const uint8_t *p, unsigned n)
 {
     uint8_t r[BLEH_MTU];
     unsigned op = p[0], s, e, hd, k, rl;
-    if (op & 0x40u) return;                         /* commands (write without response, ...): nothing to answer */
+    if (op == A_WCMD) {
+        if (n >= 4 && rd16(p + 1) == H_MIDI) midi_write(h, p + 3, n - 3);
+        return;
+    }
+    if (op & 0x40u) return;
     switch (op) {
     case A_MTU:
         if (n != 3) { att_err(h, op, 0, E_PDU); return; }
@@ -276,6 +321,7 @@ static void evt_in(bleh_t *h, const uint8_t *p, unsigned n)
             h->cccd[0] = h->cccd[1] = 0;
             h->credits = h->acl_total;
             h->rx_on = 0;
+            h->in_r = h->in_w = h->in_running = 0;
         } else if (h->state == BLEH_ADVERTISING) {
             h->want_adv = 1;
         }
@@ -285,6 +331,7 @@ static void evt_in(bleh_t *h, const uint8_t *p, unsigned n)
             h->cccd[0] = h->cccd[1] = 0;
             h->q_r = h->q_w;
             h->rx_on = 0;
+            h->in_r = h->in_w = h->in_running = 0;
             if (h->cmd_wait) h->want_adv = 1; else adv_enable(h, 1);
         }
     } else if (code == 0x13 && pl >= 1) {           /* number of completed packets: all handles, then all counts */
@@ -330,6 +377,12 @@ int bleh_midi_send(bleh_t *h, const uint8_t *m, uint8_t len, uint16_t ts)
     for (i = 0; i < len; i++) q->b[i] = m[i];
     h->q_w++;
     return 0;
+}
+int bleh_midi_next(bleh_t *h, bleh_msg_t *m)
+{
+    if (h->in_r == h->in_w) return 0;
+    *m = h->in_q[h->in_r++ % BLEH_MIDIQ];
+    return 1;
 }
 void bleh_poll(bleh_t *h)
 {

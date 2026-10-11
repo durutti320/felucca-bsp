@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments */
-/* A minimal BLE host that only sends BLE-MIDI: a peripheral that advertises, takes one connection, serves a
- * tiny GATT table (Generic Access + the BLE-MIDI service) and sends MIDI as notifications.
+/* A minimal BLE-MIDI peripheral: one connection, a small GATT table, notifications and
+ * incoming MIDI written by the central.
  *
  * It talks to a controller through standard HCI packets (H4 packet types), so it needs no vendor code:
  *   bleh_init()      set the name and the send function
@@ -42,12 +42,15 @@ typedef struct {
     uint8_t rx_have, rx_need, rx_on;
     bleh_msg_t q[BLEH_MIDIQ];
     uint8_t q_r, q_w;
+    bleh_msg_t in_q[BLEH_MIDIQ];
+    uint8_t in_r, in_w, in_running;
 } bleh_t;
 
 void bleh_init(bleh_t *h, bleh_send_fn send, void *ctx, const char *name);
 void bleh_start(bleh_t *h);
 void bleh_rx(bleh_t *h, uint8_t h4_type, const uint8_t *p, uint16_t n);
 int bleh_midi_send(bleh_t *h, const uint8_t *msg, uint8_t len, uint16_t ts13);
+int bleh_midi_next(bleh_t *h, bleh_msg_t *msg);
 void bleh_poll(bleh_t *h);
 static inline int bleh_connected(const bleh_t *h) { return h->state == BLEH_CONNECTED; }
 static inline int bleh_notifying(const bleh_t *h) { return h->state == BLEH_CONNECTED && (h->cccd[0] & 1u); }

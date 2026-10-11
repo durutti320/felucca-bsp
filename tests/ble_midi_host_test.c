@@ -192,8 +192,12 @@ static void test_connect_and_discovery(void)
     EXPECT_ATT(&H, 0x13);
     CHECK(bleh_notifying(&H));
     n = nlg;
-    ATT(&H, 0x52, 0x06, 0x00, 0x80, 0x80, 0x90, 0x3C, 0x64);   /* write without response: MIDI from the phone, ignored */
+    ATT(&H, 0x52, 0x06, 0x00, 0x80, 0x80, 0x90, 0x3C, 0x64);
     CHECK(nlg == n);
+    {   bleh_msg_t m;
+        CHECK(bleh_midi_next(&H, &m) == 1);
+        CHECK(m.len == 3 && m.b[0] == 0x90 && m.b[1] == 0x3C && m.b[2] == 0x64 && m.ts == 0);
+        CHECK(bleh_midi_next(&H, &m) == 0); }
     ATT(&H, 0x20, 0x00);                            /* an opcode we do not know */
     EXPECT_ATT(&H, 0x01, 0x20, 0x00, 0x00, 0x06);
     ATT(&H, 0x10, 0x01);                            /* truncated */
@@ -202,6 +206,34 @@ static void test_connect_and_discovery(void)
     EXPECT_ATT(&H, 0x13);
     CHECK(!bleh_notifying(&H));
     (void)o;
+}
+
+static void test_midi_receive(void)
+{
+    bleh_msg_t m;
+    unsigned n;
+    printf("MIDI characteristic writes\n");
+    bring_up(); connect();
+    n = nlg;
+    ATT(&H, 0x52, 0x06, 0x00, 0x81, 0x82, 0x90, 60, 100,
+                    0x83, 61, 110, 0x84, 0x80, 60, 0);
+    CHECK(nlg == n);
+    CHECK(bleh_midi_next(&H, &m) && m.ts == 130 && m.len == 3 &&
+          m.b[0] == 0x90 && m.b[1] == 60 && m.b[2] == 100);
+    CHECK(bleh_midi_next(&H, &m) && m.ts == 131 && m.len == 3 &&
+          m.b[0] == 0x90 && m.b[1] == 61 && m.b[2] == 110);
+    CHECK(bleh_midi_next(&H, &m) && m.ts == 132 && m.len == 3 &&
+          m.b[0] == 0x80 && m.b[1] == 60 && m.b[2] == 0);
+    CHECK(!bleh_midi_next(&H, &m));
+    ATT(&H, 0x52, 0x03, 0x00, 0x80, 0x80, 0x90, 60, 100);
+    CHECK(!bleh_midi_next(&H, &m));                /* wrong characteristic */
+    ATT(&H, 0x52, 0x06, 0x00, 0x80, 0x80, 0x90, 60);
+    CHECK(!bleh_midi_next(&H, &m));                /* truncated message */
+    ATT(&H, 0x52, 0x06, 0x00, 0x80, 0x80, 0xF0, 1, 2, 0xF7);
+    CHECK(!bleh_midi_next(&H, &m));                /* no SysEx */
+    ATT(&H, 0x52, 0x06, 0x00, 0x80, 0x80, 0x90, 62, 90);
+    evt(&H, 0x05, (const uint8_t[]){0, 0x40, 0, 0x13}, 4);
+    CHECK(!bleh_midi_next(&H, &m));                /* disconnect clears received notes */
 }
 
 static void sent_att_ok(const uint8_t *exp, unsigned en)
@@ -342,6 +374,7 @@ int main(void)
     test_init();
     test_connect_and_discovery();
     test_midi();
+    test_midi_receive();
     test_disconnect();
     test_fuzz();
     printf("%d checks, %d failed\n", checks, fails);

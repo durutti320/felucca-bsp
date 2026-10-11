@@ -6,6 +6,7 @@
  *   ble_glue_init(name)   open the controller's HCI transport and hand its packets to the host
  *   ble_glue_poll()       call from the main loop
  *   ble_glue_midi(...)    queue a MIDI message (1..3 bytes) for the central
+ *   ble_glue_midi_next()  take one MIDI message written by the central
  *
  * The controller is a task of JieLi's RTOS (btctrler_task_init); starting that RTOS next to the app is
  * the part this file does not do (see README.md). */
@@ -45,3 +46,4 @@ int ble_glue_init(const char *name, const void *ctrl_config)
 void ble_glue_poll(void) { bleh_poll(&host); }
 
 int ble_glue_midi(const uint8_t *msg, uint8_t len, uint16_t ts13) { return bleh_midi_send(&host, msg, len, ts13); }
+int ble_glue_midi_next(bleh_msg_t *msg) { return bleh_midi_next(&host, msg); }
