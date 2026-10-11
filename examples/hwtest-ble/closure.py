@@ -3,7 +3,7 @@
 # What do these roots pull from the SDK archives, and what stays undefined?
 #   closure.py LIBDIR a.a,b.a root1,root2 OUT.txt      (needs llvm-nm that reads the SDK bitcode)
 import subprocess, sys, re, collections, os
-TC="/usr/bin/llvm-nm"
+TC=os.environ.get("LLVM_NM", "/usr/bin/llvm-nm")
 LIB=sys.argv[1]; archives=sys.argv[2].split(","); roots=sys.argv[3].split(",")
 defs={}      # symbol -> (archive, member)
 members={}   # (archive, member) -> (defined set, undefined set)

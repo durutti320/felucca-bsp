@@ -1,4 +1,4 @@
-# hwtest-ble (concept: does not run)
+# hwtest-ble (link probe only; does not run)
 
 The BLE counterpart of `../hwtest`: the glue between `ble/` (the BLE-MIDI host) and JieLi's radio controller
 (`btctrler.a`, from the JieLi AC79 SDK).
@@ -8,6 +8,7 @@ The BLE counterpart of `../hwtest`: the glue between `ble/` (the BLE-MIDI host) 
 - `ble_glue.c`: opens the controller's HCI transport (`hci_transport_h4_controller_instance()`), gives its
   packets to `bleh_rx`, sends the host's packets back, and starts the controller (`btctrler_task_init`).
 - `check.sh`: compiles the glue against the SDK headers. This passes: the types and calls match the SDK.
+- `closure.py`: lists unresolved symbols and accepts `LLVM_NM` to select a bitcode-capable `llvm-nm`.
 
 ## What is not here
 
@@ -44,7 +45,9 @@ controller runs on a plain tick and a small task table, or needs more, only a de
 
 ## Next steps
 
-1. Write `stubs.c` and a linker script for the 343 symbols (constants and empty stubs first), link, and see what
-   the linker still refuses.
-2. Give the real ones a body: IRQ lock, `jiffies` from TIMER4, a task table, `syscfg_*` on a small flash page.
-3. On a device: send `HCI Reset`, expect `Command Complete`; then advertise and connect from a phone.
+1. Replace the 295 synthetic non-configuration symbols in Kreisel's link probe with real section markers, OS,
+   interrupt, timer, memory, settings and RF initialization code. The minimal LE link measured 116,803 XIP section
+   bytes and 7,572 RAM section bytes, but cannot run with synthetic symbols. With those definitions removed, the
+   optimized object references 109 unresolved symbols; Kreisel keeps their exact list in
+   `docs/ble-minimal-unresolved.txt`.
+2. On a device: send `HCI Reset`, expect `Command Complete`; then advertise and connect from a phone.

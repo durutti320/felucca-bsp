@@ -1,6 +1,6 @@
 # BLE: making the controller light (plan)
 
-Status: **plan only**. Nothing here has been built or run. Related: `ble/`, `examples/hwtest-ble/`, `docs/EXPERIMENTAL.md`.
+Status: **non-runnable link probe passed; no BLE firmware has run**. Related: `ble/`, `examples/hwtest-ble/`, `docs/EXPERIMENTAL.md` and Kreisel's `docs/ble-link-experiment.md`.
 
 ## Goal
 
