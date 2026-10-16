@@ -22,17 +22,22 @@ build() {   # NAME EXPERIMENTAL
     "$TC/pi32v2/bin/ld" -T "$HERE/app.ld" "$O/crt0.o" "$O/vec.o" "$O/isr.o" $EXTRA "$O/hwtest.o" -o "$O/hwtest.elf"
     "$TC/common/bin/objcopy" -O binary -j .text "$O/hwtest.elf" "$O/text.bin"
     "$TC/common/bin/objcopy" -O binary -j .data "$O/hwtest.elf" "$O/data.bin"
+    "$TC/common/bin/objcopy" -O binary -j .ram_text "$O/hwtest.elf" "$O/rt.bin"
     python3 - "$TC" "$O" "$OUT/$1.bin" <<'PY'
 import re, subprocess, sys
 tc, out, dest = sys.argv[1:]
 syms = subprocess.run([f"{tc}/common/bin/objdump", "-t", f"{out}/hwtest.elf"], capture_output=True, text=True, check=True).stdout
 load = int(re.search(r"^([0-9a-f]+) .*\s_data_load$", syms, re.M).group(1), 16)
+rt_load = int(re.search(r"^([0-9a-f]+) .*\s_rt_load$", syms, re.M).group(1), 16)
 start = int(re.search(r"^([0-9a-f]+) .*\s_start$", syms, re.M).group(1), 16)
 assert start == 0x02000120, hex(start)
 img = bytearray(open(f"{out}/text.bin", "rb").read())
 data = open(f"{out}/data.bin", "rb").read()
-if data:
-    img += b"\xff" * (load - 0x02000120 - len(img)) + data
+rt = open(f"{out}/rt.bin", "rb").read()        # the flash driver, copied to RAM at start
+for at, part in sorted([(rt_load, rt), (load, data)]):
+    if part:
+        assert at - 0x02000120 >= len(img), "sections overlap"
+        img += b"\xff" * (at - 0x02000120 - len(img)) + part
 img += b"\xff" * (-len(img) % 4)
 open(dest, "wb").write(img)
 print(f"{dest.rsplit('/', 1)[-1]}: {len(img)} bytes")

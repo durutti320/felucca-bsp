@@ -12,14 +12,19 @@
  *            k start the second core (experimental, 'cpu1=' then counts in the status line), u UBOOT, r reboot
  *
  * Two boots in a row that never reach the main loop's "healthy" point drop into UBOOT, so a
- * broken build can always be replaced. */
+ * broken build can always be replaced. The installer (tools/fm1_install.py, or a web installer) replaces hwtest over
+ * USB-MIDI like any firmware. */
 #include <stdint.h>
 #ifndef HWTEST_EXPERIMENTAL
 #define HWTEST_EXPERIMENTAL 0     /* 1: also the experimental parts (second core, a deliberate crash): hwtest-exp */
 #endif
 #define FELUCCA_CDC 1
-#define FELUCCA_OTA 0
-#define FELUCCA_ID (HWTEST_EXPERIMENTAL ? "felucca-bsp hwtest-exp" : "felucca-bsp hwtest")
+#define FELUCCA_OTA 1             /* the update entry: the installer can replace hwtest over USB-MIDI */
+#if HWTEST_EXPERIMENTAL                 /* the identity the installer sees, == the package's (fm1pkg.py --product) */
+#define FELUCCA_ID "FM-1_1210"
+#else
+#define FELUCCA_ID "FM-1_1200"
+#endif
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #include "fm1_time.h"
 #include "fm1_sys.h"
@@ -32,10 +37,13 @@
 #include "fm1_input.h"
 #include "fm1_adc.h"
 #include "fm1_lcd_hw.h"
+#include "fm1_flash.h"
 #include "libc.c"
 #include "usb.c"
+#include "ota.c"
 
 extern uint32_t _data_start[], _data_end[], _data_load[], _bss_start[], _bss_end[];
+extern uint32_t _rt_start[], _rt_end[], _rt_load[];   /* code that runs from RAM: the flash driver (fm1_flash.h) */
 
 static volatile uint32_t ms;
 #if HWTEST_EXPERIMENTAL
@@ -124,6 +132,56 @@ static void lcd_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint16_t rg
         fm1_lcd_wait();
         fm1_lcd_deselect();
     }
+}
+
+/* ---- the update (ota.c): the installer's M-UPGRADE session over USB-MIDI ---- */
+static uint8_t flash_ok;                        /* the expected flash part: the update may write it */
+static uint32_t ota_now_ms(void) { return ms; }
+static void ota_idle(void) { fm1_wdt_feed(); }
+static int ota_in_area(uint32_t off, uint32_t n) { return FL_IN(off, n, OTA_AREA, OTA_AREA + OTA_AREA_LEN); }
+static int ota_erase(uint32_t off)
+{
+    uint32_t took;
+    if (!ota_in_area(off, 0x1000u) || (off & 0xFFFu))
+        return -8;
+    return fl_erase4k(off, &took);
+}
+static int ota_prog(uint32_t off, const void *p, uint32_t n)
+{
+    if (!ota_in_area(off, n))
+        return -8;
+    return fl_write(off, p, n);
+}
+static int ota_fread(uint32_t off, void *p, uint32_t n)
+{
+    uint8_t *d = p;
+    while (n) {                                 /* 256-byte windows with interrupts off */
+        uint32_t k = n > 256u ? 256u : n, f = irq_save();
+        int rc = FL_FAR(fl_read_ram)(off, d, k);
+        irq_restore(f);
+        if (rc)
+            return rc;
+        off += k;
+        d += k;
+        n -= k;
+    }
+    return 0;
+}
+static void ota_show(uint32_t step, int32_t code)   /* the steps as a bar across the bottom; red on a failure */
+{
+    lcd_rect(0, 200, 240, 24, BLK);
+    if (step < 9u)
+        lcd_rect(0, 200, step * 40u, 24, CYN);
+    else
+        lcd_rect(0, 200, 240, 24, code == 1 ? GRN : RED);
+}
+static void ota_commit(const uint8_t *parm)
+{
+    guard.pending = 0;                          /* an intentional reset, not a failed boot */
+    guard.failed = 0;
+    usb_detach();
+    fm1_delay_ms(30);
+    fm1_enter_update(parm);
 }
 
 /* a fault: red screen, then reset; the record in fm1_crash survives and is shown on the next boot ('c') */
@@ -274,6 +332,13 @@ static void app_main(void)
 {
     uint32_t i, last_status = 0, last_bar = 0, shown_btn = ~0u, shown_keys = ~0u, shown_enc = 0;
     int32_t knob = 0, batt = 0;
+    {
+        uint32_t f = irq_save();
+        flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the 1 MiB part every FM-1 has */
+        irq_restore(f);
+        if (flash_ok)
+            ota_boot_cleanup();                 /* what an interrupted update left behind */
+    }
     lcd_init();
     draw_static();
     fm1_input_init();
@@ -292,6 +357,13 @@ static void app_main(void)
         usb_retry(now);
         if (usb.uboot_req)                      /* the SysEx soft key */
             command('u', 0, 0);
+        ota_service();                          /* the installer's handshake */
+        if (usb.ota_req) {                      /* and its update: commits and resets, or comes back */
+            usb.ota_req = 0;
+            if (flash_ok)
+                ota_session();
+            draw_static();
+        }
         if (!boots_ok && now > 2000u) {         /* it runs: the next boot is not a loop */
             boots_ok = 1;
             guard.pending = 0;
@@ -373,6 +445,8 @@ void fm1_cstart(void)
     for (d = _bss_start; d < _bss_end; d++)
         *d = 0;
     for (s = _data_load, d = _data_start; d < _data_end; s++, d++)
+        *d = *s;
+    for (s = _rt_load, d = _rt_start; d < _rt_end; s++, d++)    /* the flash driver, run from RAM */
         *d = *s;
     fm1_guard_enable(FM1_GUARD_STACK | FM1_GUARD_WRITE | FM1_GUARD_BUS | FM1_GUARD_PC);
     app_main();

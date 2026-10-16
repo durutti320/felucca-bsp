@@ -14,7 +14,7 @@ Small FM-1 firmware that exercises this repository on real hardware. It is a tes
 | Buttons, keys | 14 button cells and 27 key cells light while pressed. |
 | Encoders | 7 cells; a click flashes green (clockwise) or red, and moves a bar. |
 | LEDs | A walk over all 41 LEDs at power-on, then each key lights its own LED. |
-| USB | CDC serial, 115200 8N1 (the rate is ignored). A status line every 250 ms. |
+| USB | CDC serial, 115200 8N1 (the rate is ignored). A status line every 250 ms. The update entry (M-UPGRADE over USB-MIDI): the installer replaces hwtest, and a bar across the bottom of the screen shows the steps. |
 | Corner | Bottom right: red = USB not configured, blinking green = configured. Yellow bottom: the last run crashed. |
 
 Serial commands (both images): `h` help, `p` print now, `c` last crash, `w` LED walk, `u` UBOOT, `r` reboot.
@@ -22,8 +22,8 @@ The SysEx soft key (UBOOT) works too. Only in `hwtest-exp`: `k` start the second
 `x` crash on purpose (tests the fault report).
 
 Two boots in a row that do not reach the main loop's healthy point (2 s) drop into UBOOT, so a bad build
-can be replaced. hwtest has no update path of its own: to leave UBOOT, put the stock firmware back with
-`tools/fm1_rescue.sh` (macOS), then install over it.
+can be replaced. hwtest has the update entry, so the installer replaces it over USB-MIDI like any firmware. Only if it ends in
+UBOOT (two failed boots, or `u`) does it need `tools/fm1_rescue.sh` (macOS): the stock firmware, then install over it.
 
 ## Build
 
@@ -36,14 +36,14 @@ About 9 KB each. The toolchain is JieLi's own (see Felucca's `tools/get_toolchai
 Build the loader (`loader/`, see the README), then pack and install with the tools in this repository:
 
     tools/get_sdk.sh                                  # JieLi's SDK, fetched from JieLi, checked by hash (~0.5 GB)
-    AC79_SDK=~/.jieli/ac79-sdk python3 tools/fm1pkg.py hwtest.bin loader.bin hwtest.fwsc --product FM-1_9T0      # hwtest-exp: FM-1_9T1
+    AC79_SDK=~/.jieli/ac79-sdk python3 tools/fm1pkg.py hwtest.bin loader.bin hwtest.fwsc --product FM-1_1200     # hwtest-exp: FM-1_1210
     python3 tools/fm1_install.py hwtest.fwsc          # needs mido and python-rtmidi
 
 `fm1pkg.py` takes three small files from the JieLi AC79 SDK (Apache-2.0) and puts them in the package.
 
 ## Status
 
-Built and packaged; not yet run on a device. Run the safe image first. The first run is the test. Expected: colour bars, then the
+Runs on an FM-1 (2026-10-16): it stays up, the serial status and commands work, and the installer replaces it. Run the safe image first. The first run is the test. Expected: colour bars, then the
 LED walk; if nothing appears, reset twice and the device enters UBOOT.
 
 ## Licence
