@@ -113,6 +113,7 @@ static void lcd_init(void)
     lcd_cmd(0x36, &madctl, 1);                  /* top-left origin, RGB */
     lcd_cmd(0x21, 0, 0);                        /* INVON: this panel is IPS */
     lcd_cmd(0x13, 0, 0);                        /* NORON */
+    lcd_cmd(0x29, 0, 0);                        /* DISPON: without it the panel stays dark */
     fm1_lcd_baud(4);
 }
 
