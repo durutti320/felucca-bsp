@@ -217,12 +217,18 @@ static void draw_static(void)
         lcd_rect(ENC_X(i), 72, 30, 22, DIM);
 }
 
-static void draw_bar(uint32_t y, int32_t v, uint16_t col)   /* v 0..1023 over 232 px */
+/* v 0..1023 over 232 px, drawn when its width changes, each part once (lit, then the rest dim): painting the whole
+ * bar dim first showed as a flash on every redraw */
+static void draw_bar(uint32_t y, int32_t v, uint16_t col, uint32_t *shown)
 {
     uint32_t w = v < 0 ? 0u : (uint32_t)v * 232u / 1023u;
-    lcd_rect(4, y, 232, 12, DIM);
+    if (w == *shown)
+        return;
+    *shown = w;
     if (w)
         lcd_rect(4, y, w, 12, col);
+    if (w < 232u)
+        lcd_rect(4u + w, y, 232u - w, 12, DIM);
 }
 
 /* ---- serial console ---- */
@@ -333,6 +339,7 @@ static void app_main(void)
 {
     uint32_t i, last_status = 0, last_bar = 0, shown_btn = ~0u, shown_keys = ~0u, shown_enc = 0;
     int32_t knob = 0, batt = 0;
+    uint32_t knob_w = ~0u, batt_w = ~0u;            /* the bars' widths on the screen (~0: not drawn yet) */
     {
         uint32_t f = irq_save();
         flash_ok = FL_FAR(fl_jedec_ram)() == 0x856014u;   /* the 1 MiB part every FM-1 has */
@@ -374,8 +381,8 @@ static void app_main(void)
             last_bar = now;
             knob = fm1_adc_read(FM1_ADC_MASTER);
             batt = fm1_adc_read(FM1_ADC_BATT);
-            draw_bar(28, knob, WHT);
-            draw_bar(46, batt, GRN);
+            draw_bar(28, knob, WHT, &knob_w);
+            draw_bar(46, batt, GRN, &batt_w);
         }
         for (i = 0; i < FM1_NENC; i++) {
             int32_t s = fm1_enc_take(i);
