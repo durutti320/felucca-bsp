@@ -22,7 +22,8 @@ The SysEx soft key (UBOOT) works too. Only in `hwtest-exp`: `k` start the second
 `x` crash on purpose (tests the fault report).
 
 Two boots in a row that do not reach the main loop's healthy point (2 s) drop into UBOOT, so a bad build
-can be replaced.
+can be replaced. hwtest has no update path of its own: to leave UBOOT, put the stock firmware back with
+`tools/fm1_rescue.sh` (macOS), then install over it.
 
 ## Build
 

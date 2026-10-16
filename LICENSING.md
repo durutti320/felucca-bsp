@@ -34,7 +34,9 @@ GPL project.
 ## Tools
 
 `tools/fm1pkg.py` (package builder) and `tools/fm1_install.py` (USB-MIDI installer) are MPL-2.0, moved here from Felucca
-by their only author. Packages built by `fm1pkg.py` contain three files of the JieLi AC79 SDK (`uboot.boot`,
+by their only author. `tools/fm1_rescue.py` and `fm1_rescue.sh` (rescue) are MPL-2.0, from fm1-x0x by their author; the
+rescue downloads, when it runs, JieLi's flash loader from jl-uboot-tool and M-VAVE's stock firmware, both checked by
+hash, neither in this repository. Packages built by `fm1pkg.py` contain three files of the JieLi AC79 SDK (`uboot.boot`,
 `cfg_tool.bin`, `eq_cfg_hw.bin`), which are Apache-2.0: ship `LICENSES/Apache-2.0.txt` with every package.
 
 The JieLi SDK is never copied into this repository. `tools/get_sdk.sh` fetches it from JieLi's repository at a fixed revision and
