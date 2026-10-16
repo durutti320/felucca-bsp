@@ -14,7 +14,7 @@
  * the composite presents itself, usb_cdc_switch / FELUCCA_CDC_DEFAULT=0 leave
  * the console out (descriptors, below).
  * FELUCCA_UAC=1 adds a USB audio input (UAC1, class compliant): the master
- * output as 16-bit stereo at 44.1 kHz on an isochronous asynchronous IN
+ * output (the 24-bit samples the I2S takes) as 16-bit stereo at 44.1 kHz on an isochronous asynchronous IN
  * endpoint (EP4), so a computer can record the FM-1 over the cable. audio.c
  * fills a ring (uac_render_start, uac_tap); uac_service sends one packet per
  * USB frame from the TIMER5 ISR, nested in the render too (main.c). The
@@ -1063,6 +1063,8 @@ static inline int32_t uac_s16(int32_t v)
 {
     return v > 32767 ? 32767 : v < -32768 ? -32768 : v;
 }
+/* a sample as the I2S takes it (24-bit, fm1_audio.h) to 16 bits, rounded */
+static inline int32_t uac_in16(int32_t v) { return uac_s16((v + 128) >> 8); }
 
 #if FELUCCA_UAC_48K
 /* 44.1 -> 48 kHz (x 160 / 147), one block: each input frame enters the history, then the 1 or 2 output
@@ -1077,7 +1079,7 @@ static __attribute__((noinline)) void uac_tap48(const int32_t *out, uint32_t n)
     }
     for (i = 0; i < n; i++) {
         uint32_t s = h & (RS_H - 1u);
-        int16_t l = (int16_t)uac_s16(out[2u * i]), r = (int16_t)uac_s16(out[2u * i + 1u]);
+        int16_t l = (int16_t)uac_in16(out[2u * i]), r = (int16_t)uac_in16(out[2u * i + 1u]);
         rs.l[s] = rs.l[s + RS_H] = l;
         rs.r[s] = rs.r[s + RS_H] = r;
         h++;
@@ -1123,7 +1125,7 @@ static __attribute__((noinline)) void uac_tap48(const int32_t *out, uint32_t n)
 }
 #endif
 
-static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   /* audio ISR: one block (Q15) */
+static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   /* audio ISR: one block, 24-bit as the I2S takes it */
 {
     uint32_t w = ua_w, i;
     if (!uac.feed)
@@ -1151,8 +1153,8 @@ static __attribute__((noinline)) void uac_tap(const int32_t *out, uint32_t n)   
     }
 #else
     for (i = 0; i < n; i++)
-        ua_ring[(w + i) & (UA_N - 1u)] = (uint32_t)(uint16_t)uac_s16(out[2u * i]) |
-                                         (uint32_t)(uint16_t)uac_s16(out[2u * i + 1u]) << 16;
+        ua_ring[(w + i) & (UA_N - 1u)] = (uint32_t)(uint16_t)uac_in16(out[2u * i]) |
+                                         (uint32_t)(uint16_t)uac_in16(out[2u * i + 1u]) << 16;
 #endif
     RING_PUBLISH();
     ua_w = w + n;
