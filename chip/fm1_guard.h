@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Charles Vestal (fm1_guard_stack_floor)
  * Written against the public JieLi AC79 SDK (Apache-2.0); see NOTICE. */
 /* FM-1 hardware guards (after the SDK's
  * cpu/wl82/debug.c). Every violation raises the CPU exception (vector 1) and
@@ -95,6 +96,17 @@ static void fm1_guard_lock_top(void)
     FM1_WR_LIMIT_L(2) = 0x01C7FD50u;
     FM1_WR_LIMIT_H(2) = 0x01C7FFFFu;
     FM1_C0_WR_LIMIT_EN |= 4u;
+    fm1__dbg_lock();
+}
+
+/* let sp go down to lo (stacks of a radio's tasks, in the pool), up to the system stack's top as before */
+static void fm1_guard_stack_floor(uint32_t lo)
+{
+    fm1__dbg_unlock();
+    FM1_EMU_CON &= ~(1u << 3);
+    FM1_EMU_SSP_L = lo;
+    FM1_EMU_USP_L = lo;
+    FM1_EMU_CON |= 1u << 3;
     fm1__dbg_lock();
 }
 
