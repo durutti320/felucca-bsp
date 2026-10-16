@@ -218,6 +218,8 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 #ifndef FELUCCA_CDC_DEFAULT
 #define FELUCCA_CDC_DEFAULT 1
 #endif
+/* FELUCCA_USB_MANUFACTURER, FELUCCA_USB_PRODUCT: optional ASCII strings for the USB names (string
+ * descriptors 1 and 2); without them the Hügelton / Felucca names below. */
 #ifndef FELUCCA_USB_PID
 #define FELUCCA_USB_PID 0x0001   /* the update loader is 0x0002 */
 #endif
@@ -338,6 +340,28 @@ static const uint8_t STR2[] = {30, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c
 static const uint8_t STR2[] = {16, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c', 0, 'a', 0};
 #endif
 
+#if defined(FELUCCA_USB_MANUFACTURER) || defined(FELUCCA_USB_PRODUCT)
+/* A string descriptor built from a plain ASCII string (the build settings FELUCCA_USB_MANUFACTURER and
+ * FELUCCA_USB_PRODUCT, e.g. -DFELUCCA_USB_PRODUCT='"CTL-1 FM-1"'), at most 31 characters. EP0 sends one
+ * descriptor at a time, so one buffer serves both. */
+static uint8_t usb_str_buf[2 + 2 * 31];
+
+static int usb_str_desc(const char *s, const uint8_t **d, uint16_t *l)
+{
+    uint32_t n = 0;
+    while (s[n] && n < 31u) {
+        usb_str_buf[2 + 2 * n] = (uint8_t)s[n];
+        usb_str_buf[3 + 2 * n] = 0;
+        n++;
+    }
+    usb_str_buf[0] = (uint8_t)(2 + 2 * n);
+    usb_str_buf[1] = 3;
+    *d = usb_str_buf;
+    *l = (uint16_t)(2 + 2 * n);
+    return 1;
+}
+#endif
+
 static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
 {
     switch (wvalue >> 8) {
@@ -356,13 +380,21 @@ static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
             *l = sizeof STR0;
             return 1;
         case 1:
+#ifdef FELUCCA_USB_MANUFACTURER
+            return usb_str_desc(FELUCCA_USB_MANUFACTURER, d, l);
+#else
             *d = STR1;
             *l = sizeof STR1;
             return 1;
+#endif
         case 2:
+#ifdef FELUCCA_USB_PRODUCT
+            return usb_str_desc(FELUCCA_USB_PRODUCT, d, l);
+#else
             *d = STR2;
             *l = sizeof STR2;
             return 1;
+#endif
         default:
             return 0;
         }
