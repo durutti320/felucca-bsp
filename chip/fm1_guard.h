@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * Copyright (C) 2026 Charles Vestal (fm1_guard_stack_floor)
+ * Copyright (C) 2026 Charles Vestal (fm1_guard_stack_floor, fm1_sp_in_isr)
  * Written against the public JieLi AC79 SDK (Apache-2.0); see NOTICE. */
 /* FM-1 hardware guards (after the SDK's
  * cpu/wl82/debug.c). Every violation raises the CPU exception (vector 1) and
@@ -23,6 +23,7 @@
 #pragma once
 #include <stdint.h>
 #include "fm1_irq.h"
+#include "fm1_cc.h"
 
 #define FM1_X2(off) (*(volatile uint32_t *)(0x1EEE000u + (off)))
 #define FM1_WR_LIMIT_H(n) FM1_X2(0x280u + 4u * (n))
@@ -116,4 +117,13 @@ static void fm1_guard_unlock_top(void)
     fm1__dbg_unlock();
     FM1_C0_WR_LIMIT_EN &= ~4u;
     fm1__dbg_lock();
+}
+
+/* the code runs on the system stack: an interrupt (crt0 points ssp there; the main loop and the tasks of a
+ * scheduler run elsewhere). fm1-radio's test, for a shim that must not wait inside an interrupt */
+FM1_INLINE int fm1_sp_in_isr(void)
+{
+    uint32_t sp;
+    __asm__ volatile("%0 = sp" : "=r"(sp));
+    return sp >= (uint32_t)(uintptr_t)_guard1 && sp <= (uint32_t)(uintptr_t)_sstack_top;
 }
