@@ -99,6 +99,8 @@ FM1_INLINE void fm1_usb_ep_send(uint32_t ep, void *p, uint32_t n)
 /* EP4 IN (the USB audio stream, isochronous): its DMA address and count have their own
  * registers (SDK usb_set_dma_taddr / usb_write_ep_cnt, id 0, ep 4) */
 FM1_INLINE void fm1_usb_ep4_txbuf(void *p) { FM1_USB_EP4_TADR = (uint32_t)(uintptr_t)p; }
+/* EP4 OUT (the USB audio output, isochronous): its DMA address (SDK usb_set_dma_raddr, ep 4) */
+FM1_INLINE void fm1_usb_ep4_rxbuf(void *p) { FM1_USB_EP4_RADR = (uint32_t)(uintptr_t)p; }
 FM1_INLINE void fm1_usb_ep4_send(void *p, uint32_t n)
 {
     __asm__ volatile("csync" ::: "memory");
