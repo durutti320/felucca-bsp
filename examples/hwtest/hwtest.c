@@ -9,6 +9,8 @@
  *   LEDs     a walk over all 41 LEDs at power-on, then each key lights its own
  *   USB      CDC serial "debug port" (115200 8N1, the rate is ignored): a status line every 250 ms
  *            and one-letter commands: h help, p print now, c last crash, x crash on purpose, w LED walk,
+ *            a the keys' readings on / off, as fm1-ctl reads them (the status line then shows rows PA7 and PA8,
+ *              then the top row's seven keys: 1023 open, lower the harder a key is pressed),
  *            k start the second core (experimental, 'cpu1=' then counts in the status line), u UBOOT, r reboot
  *
  * Two boots in a row that never reach the main loop's "healthy" point drop into UBOOT, so a
@@ -34,6 +36,12 @@
 #include "fm1_cpu1.h"
 #endif
 #include "fm1_timer.h"
+/* the keys' readings ('a'): rows PA7 (an_v[0]) and PA8 (an_v[1]), and the top row through the probe (an_top);
+ * a held key read with its row driven (as fm1-ctl does) */
+static volatile uint16_t an_v[2][11], an_top[7];
+#define FM1_INPUT_ANALOG(col, rowbit, v, driven) (an_v[(rowbit) - 3u][col] = (uint16_t)(v))
+#define FM1_INPUT_PROBE(col, rowbit, v, pressed) (an_top[col] = (uint16_t)(v))
+#define FM1_INPUT_DRIVE(col, rowbit) (FM1_KEYMAP[rowbit][col] >= 14 && ((fm1_in.notes >> (FM1_KEYMAP[rowbit][col] - 14)) & 1u))
 #include "fm1_input.h"
 #include "fm1_adc.h"
 #include "fm1_lcd_hw.h"
@@ -273,6 +281,17 @@ static void status(int32_t knob, int32_t batt)
         putd("", (uint32_t)enc_pos[i]);
     }
     putd("usb_cfg=", usb.config);
+    if (fm1_an.con) {                           /* the keys' readings: PA7's eleven columns, PA8's, the top row's seven */
+        uint32_t r, c;
+        puts_("an=");
+        for (r = 0; r < 2u; r++)
+            for (c = 0; c < FM1_NCOL; c++)
+                putd("", an_v[r][c]);
+        puts_("top=");
+        for (c = 0; c < 7u; c++)
+            putd("", an_top[c]);
+        putd("an_timeouts=", fm1_an.timeouts);
+    }
 #if HWTEST_EXPERIMENTAL
     if (cpu1_started)
         putd("cpu1=", cpu1_count);
@@ -284,8 +303,8 @@ static void command(char c, int32_t knob, int32_t batt)
 {
     switch (c) {
     case 'h':
-        puts_(HWTEST_EXPERIMENTAL ? "h help, p print, c last crash, w LED walk, u UBOOT, r reboot, k start CPU1, x crash on purpose\r\n"
-                                  : "h help, p print, c last crash, w LED walk, u UBOOT, r reboot\r\n");
+        puts_(HWTEST_EXPERIMENTAL ? "h help, p print, c last crash, w LED walk, a key readings, u UBOOT, r reboot, k start CPU1, x crash on purpose\r\n"
+                                  : "h help, p print, c last crash, w LED walk, a key readings, u UBOOT, r reboot\r\n");
         break;
     case 'p':
         status(knob, batt);
@@ -317,6 +336,17 @@ static void command(char c, int32_t knob, int32_t batt)
         *(volatile uint32_t *)0 = 1;
         break;
 #endif
+    case 'a':                                   /* the keys' readings on / off, as fm1-ctl reads them */
+        if (fm1_an.con) {
+            fm1_an.con = 0;
+            puts_("key readings off\r\n");
+        } else {
+            fm1_an.drive = 1;
+            fm1_an.probe = 1;
+            fm1_an.con = (uint16_t)FM1_ADC_CON(7, 2);
+            puts_("key readings on\r\n");
+        }
+        break;
     case 'w':
         walk_until = ms + 41u * 60u;
         break;
@@ -379,8 +409,12 @@ static void app_main(void)
         }
         if (now - last_bar >= 40u) {            /* ADC: polled, a few hundred us */
             last_bar = now;
-            knob = fm1_adc_read(FM1_ADC_MASTER);
-            batt = fm1_adc_read(FM1_ADC_BATT);
+            if (fm1_an.con) {                   /* the scan owns the converter: the pot comes from it */
+                knob = fm1_an.master;
+            } else {
+                knob = fm1_adc_read(FM1_ADC_MASTER);
+                batt = fm1_adc_read(FM1_ADC_BATT);
+            }
             draw_bar(28, knob, WHT, &knob_w);
             draw_bar(46, batt, GRN, &batt_w);
         }
