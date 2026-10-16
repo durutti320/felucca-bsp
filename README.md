@@ -42,7 +42,7 @@ when they have been checked on a real unit.
 
 | Path | What |
 | --- | --- |
-| `chip/` | Registers, drivers and boot entry shared by the chip family; `libc.c` (the few routines a freestanding build needs); `ota.c` (the update session, which takes its hooks from the application) |
+| `chip/` | Registers, drivers and boot entry shared by the chip family; `libc.c` (the few routines a freestanding build needs); `ota.c` (the update session, which takes its hooks from the application); `fm1_perf.h` (cycle and stall counters) and `fm1_debug.h` (register access for development builds) |
 | `chip/usb.c` | The USB device: MIDI, serial and audio classes with the EP0 and poll code |
 | `loader/` | The update loader (builds as a RAM image; it includes `chip/usb.c`, `chip/ota.c` and `chip/libc.c`) |
 | `boards/fm1/` | FM-1 wiring and drivers: LCD pins, key scan, ADC channels, audio codec lines |
