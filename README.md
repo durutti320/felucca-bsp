@@ -12,13 +12,13 @@ belong to their owners.
 > **Experimental parts.** Some features here are **beta**: the second core (`chip/fm1_cpu1.*`) and expanded flash
 > (`chip/fm1_flash_ext.h`). Others are only a **concept** that does not run: BLE, USB host, a higher clock. None has run
 > on a device yet. What is established and what is not: [docs/EXPERIMENTAL.md](docs/EXPERIMENTAL.md). The safe test
-> firmware (`examples/hwtest/hwtest.bin`) contains none of them.
+> firmware (`examples/hwtest/hwtest.bin`) contains none of them. Working Bluetooth MIDI and WiFi, on JieLi's own
+> radio libraries, are in [fm1-base](https://github.com/charlesvestal/fm1-base), which builds on this repository.
 
-> **Work in progress: moving out of Felucca, licences under review**
-> This code is being moved here from Felucca. The MPL-2.0 headers describe the intended licence; they are not final
-> until every contributor whose code touches these files has been asked and has answered. Until then, treat the
-> licence status of each file as provisional, and check [LICENSING.md](LICENSING.md) and [NOTICE](NOTICE) for the
-> current state. Do not build a release on this yet.
+> **Licences: settled.** The files here are MPL-2.0. Leo Kuroshita confirmed it for the Felucca code he owns
+> ([#4](https://github.com/hugelton/felucca-bsp/issues/4)), and keremimo for his part of `chip/usb.c`
+> ([#3](https://github.com/hugelton/felucca-bsp/pull/3)). Details in [LICENSING.md](LICENSING.md) and
+> [NOTICE](NOTICE).
 
 > **Licence notes before you start**
 > - A fork of Felucca cannot move to MPL-2.0 by using this repository. To use another licence, start a new project and import this one: [Forks of Felucca](LICENSING.md#forks-of-felucca).
@@ -74,6 +74,7 @@ Licences" notice). See the notes at the top. Credits, including the JieLi SDK (A
 | Firmware | Device | Licence | About |
 | --- | --- | --- | --- |
 | [Felucca](https://github.com/hugelton/Felucca) | M-VAVE FM-1 | GPL-3.0-only | Multi-engine synthesizer firmware with a sequencer and a web editor. |
+| [fm1-base](https://github.com/charlesvestal/fm1-base) | M-VAVE FM-1 | MPL-2.0 | A base and template for FM-1 firmware: platform, host simulator, browser emulator, Bluetooth MIDI, WiFi, USB audio. |
 
 Using the base? Open an issue with the "List your firmware" form. We add the link and a short
 description. Rules are in [LISTING.md](LISTING.md).

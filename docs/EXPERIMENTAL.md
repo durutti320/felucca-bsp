@@ -30,7 +30,9 @@ FM-1's USB-C port may not be able to supply 5 V (VBUS) or to switch to host at a
 ## BLE
 
 See [ble-plan.md](ble-plan.md), `ble/` and `examples/hwtest-ble/`: a host that runs on a PC against a fake controller, and a survey of what
-the JieLi controller needs. Concept only.
+the JieLi controller needs. Concept only. Bluetooth MIDI that runs on the FM-1, on JieLi's own controller and stack
+(binary, Apache-2.0), is in [fm1-base](https://github.com/charlesvestal/fm1-base); what it took is in
+[#2](https://github.com/hugelton/felucca-bsp/issues/2).
 
 ## Clock up to 320 MHz
 
