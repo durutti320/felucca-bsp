@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * Copyright (C) 2026 Charles Vestal (fm1_irq_unmask, fm1_uptime_ms) */
+ * Copyright (C) 2026 Charles Vestal (fm1_irq_unmask, fm1_uptime_ms, fm1_crash_ctx) */
 /* FM-1 interrupt / exception HAL.
  *
  *   fm1_irq_init()        first thing in cstart: all ICFG off, pendings and
@@ -13,6 +13,9 @@
  *
  * The application supplies fm1_fault(const fm1_crash_t *) which reports the
  * crash (LCD) and resets; the record survives in .noinit for the next boot.
+ * fm1_crash_ctx keeps the registers of the last FM1_CRASH_CTX_N crashes beside
+ * it (an entry is one of them when its count is within the last
+ * FM1_CRASH_CTX_N of fm1_crash.count).
  */
 #pragma once
 #include <stdint.h>
@@ -50,6 +53,14 @@ typedef struct {
  * file-local object would let the compiler assume its zero initial value and
  * fold the magic check away. */
 fm1_crash_t fm1_crash __attribute__((section(".noinit")));
+
+/* the registers at the last crashes, the oldest overwritten: which register held what when the CPU faulted (a
+ * pointer one bit off with the memory it came from intact, sp a word off). count is the crash's fm1_crash.count */
+#define FM1_CRASH_CTX_N 4u
+typedef struct {
+    uint32_t count, pc, r[16], usp, ssp;
+} fm1_crash_ctx_t;
+fm1_crash_ctx_t fm1_crash_ctx[FM1_CRASH_CTX_N] __attribute__((section(".noinit")));
 
 extern const char fm1_fatal_stubs[];
 static void fm1_fault(const fm1_crash_t *c);   /* application: report, then reset */
@@ -116,6 +127,15 @@ void fm1_fault_c(uint32_t *f)
     for (i = 0; i < 4u; i++)
         fm1_crash.etm[i] = FM1_ETM_PC(i);
     fm1_crash.early = fm1_crash.uptime_ms < 3000u ? early + 1u : 0u;
+    {
+        fm1_crash_ctx_t *x = &fm1_crash_ctx[fm1_crash.count % FM1_CRASH_CTX_N];
+        x->count = fm1_crash.count;
+        x->pc = f[16];
+        for (i = 0; i < 16u; i++)
+            x->r[i] = f[i];                   /* frame: r0..r15 first (fm1_vec.S) */
+        x->usp = f[22];
+        x->ssp = f[23];
+    }
     fm1_fault(&fm1_crash);
     for (;;)
         ;
