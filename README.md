@@ -23,8 +23,10 @@ belong to their owners.
 > **Licence notes before you start**
 > - A fork of Felucca cannot move to MPL-2.0 by using this repository. To use another licence, start a new project and import this one: [Forks of Felucca](LICENSING.md#forks-of-felucca).
 
-> Status: early. Split out of [Felucca](https://github.com/hugelton/Felucca). It cannot be
-> built on its own yet. Expect changes to file names and layout.
+> **Status: beta.** Split out of [Felucca](https://github.com/hugelton/Felucca). Firmware is built on it through
+> [fm1-base](https://github.com/charlesvestal/fm1-base), and two firmwares are its proof points so far:
+> [CTL-1](https://github.com/charlesvestal/fm1-ctl) (Bluetooth MIDI) and [Radio](https://github.com/charlesvestal/fm1-radio)
+> (WiFi). Expect changes to file names and layout.
 
 ## Devices
 
@@ -75,6 +77,8 @@ Licences" notice). See the notes at the top. Credits, including the JieLi SDK (A
 | --- | --- | --- | --- |
 | [Felucca](https://github.com/hugelton/Felucca) | M-VAVE FM-1 | GPL-3.0-only | Multi-engine synthesizer firmware with a sequencer and a web editor. |
 | [fm1-base](https://github.com/charlesvestal/fm1-base) | M-VAVE FM-1 | MPL-2.0 | A base and template for FM-1 firmware: platform, host simulator, browser emulator, Bluetooth MIDI, WiFi, USB audio. |
+| [CTL-1](https://github.com/charlesvestal/fm1-ctl) | M-VAVE FM-1 | MPL-2.0 | A MIDI controller with velocity and aftertouch, scales and chords, an arpeggiator, a Euclidean drum sequencer and GM sounds; USB and Bluetooth MIDI. On fm1-base. |
+| [Radio](https://github.com/charlesvestal/fm1-radio) | M-VAVE FM-1 | MPL-2.0 | An internet radio over WiFi: Radio Garden's stations, MP3 and HE-AAC, punch-in effects. On fm1-base. |
 
 Using the base? Open an issue with the "List your firmware" form. We add the link and a short
 description. Rules are in [LISTING.md](LISTING.md).
