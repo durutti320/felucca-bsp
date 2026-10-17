@@ -49,6 +49,7 @@ when they have been checked on a real unit.
 | `ble/` | **Concept, does not run yet.** A minimal BLE-MIDI sender over standard HCI; tested on a PC against a fake controller only ([ble/README.md](ble/README.md)) |
 | `examples/hwtest-ble/` | **Concept, does not run.** Glue between `ble/` and JieLi's radio controller, and a survey of what linking it needs; no firmware ([README](examples/hwtest-ble/README.md)) |
 | `docs/EXPERIMENTAL.md` | Second core, expanded flash, USB host, BLE, clock: what is established and what is not |
+| `docs/CPU.md` | What the CPU has been seen to do: 64-bit multiplies among 16-bit loads leave a register a bit off; keep them out of line |
 | `tools/` | Package builder (`fm1pkg.py`) and USB-MIDI installer (`fm1_install.py`) |
 | `examples/hwtest/` | Test firmware for a real FM-1: screen, knob, buttons, LEDs, USB serial. `hwtest.bin` is the safe image; `hwtest-exp.bin` adds the experimental parts |
 | `examples/felucca/` | Reference only: `ota_hw.c`, the hooks Felucca gives `ota.c`. Not built here |
