@@ -51,10 +51,19 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
 /* Felucca's own store (projects, user samples; settings; the autosave) */
 #define FL_STORE_OK(off, n) (FL_IN(off, n, FL_DATA_LO, FL_DATA_HI) || FL_IN(off, n, FL_GLOB_LO, FL_GLOB_HI) || \
                              FL_IN(off, n, FL_AUTO_LO, FL_AUTO_HI))
+/* More flash for a firmware's own data, outside the store: between the app area (the loader writes only below
+ * 0x93000) and the store, and from above the autosave up to the globals. The update loader clears an update
+ * record it finds at a 4 KiB boundary - 256 here (ldr_core.c: "AT" at bytes 6..7 and a valid CRC), so a firmware
+ * keeps bytes 0xF00..0xF07 of each of these sectors erased (or anything but a record) */
+#define FL_XDATA0_LO    0x00093000u
+#define FL_XDATA0_HI    0x00097000u
+#define FL_XDATA1_LO    0x000E7000u
+#define FL_XDATA1_HI    0x000FC000u
+#define FL_XDATA_OK(off, n) (FL_IN(off, n, FL_XDATA0_LO, FL_XDATA0_HI) || FL_IN(off, n, FL_XDATA1_LO, FL_XDATA1_HI))
 /* Where the RAM driver may erase / program. The app build allows only its own
  * data regions; the update loader (firmware/loader) defines its own window. */
 #ifndef FL_RANGE_OK
-#define FL_RANGE_OK(off, n) (FL_STORE_OK(off, n) || FL_IN(off, n, FL_OTA_LO, FL_OTA_HI))
+#define FL_RANGE_OK(off, n) (FL_STORE_OK(off, n) || FL_XDATA_OK(off, n) || FL_IN(off, n, FL_OTA_LO, FL_OTA_HI))
 #endif
 
 typedef struct { uint32_t sfc_con, spi_con; } fl_saved_t;
