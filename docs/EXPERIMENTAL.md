@@ -1,6 +1,6 @@
 # Experimental features
 
-Status of the advanced features planned for this repository. **Beta**: the second core and expanded flash (code exists, never run on a device). **Concept**: BLE, USB host, the clock (nothing runs). Nothing here has run on a device; each item says what is
+Status of the advanced features planned for this repository. **Beta**: the second core and expanded flash (code exists, never run on a device). **Concept**: USB host, the clock (nothing runs). Nothing here has run on a device; each item says what is
 established, what is guessed, and what the first bench test is. All of it stays behind explicit calls: no firmware
 starts any of it by itself.
 
@@ -27,12 +27,12 @@ The USB0 core has host-mode functions in the SDK (`usb_h_sie_init`, `usb_h_chirp
 in `cpu.a`), on the same controller `chip/usb.c` drives as a device. Not started. Unknown and possibly blocking: the
 FM-1's USB-C port may not be able to supply 5 V (VBUS) or to switch to host at all. First step: look at the board.
 
-## BLE
+## Bluetooth
 
-See [ble-plan.md](ble-plan.md), `ble/` and `examples/hwtest-ble/`: a host that runs on a PC against a fake controller, and a survey of what
-the JieLi controller needs. Concept only. Bluetooth MIDI that runs on the FM-1, on JieLi's own controller and stack
-(binary, Apache-2.0), is in [fm1-base](https://github.com/charlesvestal/fm1-base); what it took is in
-[#2](https://github.com/hugelton/felucca-bsp/issues/2).
+Not here. Bluetooth MIDI that runs on the FM-1, on JieLi's own controller and stack (binary, Apache-2.0), is in
+[fm1-base](https://github.com/charlesvestal/fm1-base); what it took is in
+[#2](https://github.com/hugelton/felucca-bsp/issues/2). The earlier concept of a host of our own over HCI is in
+this repository's history.
 
 ## Clock up to 320 MHz
 
