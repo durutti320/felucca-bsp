@@ -83,23 +83,42 @@ static struct {
  * band: ~5.8 ms). Measured under load (65 % CPU): a 64..112 band started renders at
  * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
  * still be in hand then. */
-#define UA_N 512u                /* ring, frames (16-bit L | R << 16); a power of two */
-#if HALF_FRAMES > 128u           /* 256-frame halves: the band X0X measured for them */
-#define UA_PRIME 128u
-#define UA_LO 96u
-#define UA_HI 160u
+/* The ring is written when a render ends, so it must last through the render: the band holds 2.2 .. 3.6 ms
+ * with 256-frame halves, enough while a render takes under ~40 % of its time. FELUCCA_UAC_DEEP=1 (an app whose
+ * renders run longer) keeps a whole half more in hand: a 1024-frame ring (4 KB, FELUCCA_UAC_RING_ATTR may place
+ * it in another section), the band and the priming a half higher (+5.8 ms of latency), so a render may take its
+ * whole time. Without it a long render runs the ring dry: the packets repeat their last frame (a hold, heard as a
+ * crackle in the recording, not on the FM-1's own output). */
+#ifndef FELUCCA_UAC_DEEP
+#define FELUCCA_UAC_DEEP 0
+#endif
+#ifndef FELUCCA_UAC_RING_ATTR
+#define FELUCCA_UAC_RING_ATTR
+#endif
+#if FELUCCA_UAC_DEEP
+#define UA_N 1024u               /* ring, frames (16-bit L | R << 16); a power of two */
+#define UA_DEEP HALF_FRAMES
 #else
-#define UA_PRIME 104u            /* silence ahead of the first rendered frame */
-#define UA_LO 80u                /* a render may start late: keep a packet and more in hand */
-#define UA_HI 128u
+#define UA_N 512u
+#define UA_DEEP 0u
+#endif
+#if HALF_FRAMES > 128u           /* 256-frame halves: the band X0X measured for them */
+#define UA_PRIME (128u + UA_DEEP)
+#define UA_LO (96u + UA_DEEP)
+#define UA_HI (160u + UA_DEEP)
+#else
+#define UA_PRIME (104u + UA_DEEP)            /* silence ahead of the first rendered frame */
+#define UA_LO (80u + UA_DEEP)                /* a render may start late: keep a packet and more in hand */
+#define UA_HI (128u + UA_DEEP)
 #endif
 #define UAC_RATE 44100u
 #if FELUCCA_UAC_48K
 /* 48 kHz: the same times in 48 kHz frames (x 160 / 147); a render of HALF_FRAMES gives 139..140 frames */
-#define UA_PRIME48 113u
-#define UA_LO48 87u
-#define UA_HI48 139u
 #define UA_REND48 ((HALF_FRAMES * 160u + 146u) / 147u)
+#define UA_DEEP48 (UA_DEEP ? UA_REND48 : 0u)
+#define UA_PRIME48 (113u + UA_DEEP48)
+#define UA_LO48 (87u + UA_DEEP48)
+#define UA_HI48 (139u + UA_DEEP48)
 #define UA_MAXF 49u              /* frames in the largest packet: 48 + 1 */
 _Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a render and a packet (48 kHz)");
 #else
@@ -107,7 +126,7 @@ _Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a
 #endif
 #define UAC_MAXP (UA_MAXF * 4u)
 _Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a render and a packet");
-static uint32_t ua_ring[UA_N];
+static uint32_t ua_ring[UA_N] FELUCCA_UAC_RING_ATTR;
 static volatile uint32_t ua_w, ua_r;
 static uint32_t ep4tx[UA_MAXF] __attribute__((aligned(4)));
 static struct {
