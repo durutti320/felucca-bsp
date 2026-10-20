@@ -74,8 +74,9 @@ _Static_assert(FL_REC_HI == FL_CAL_LO && FL_OTA_HI <= FL_REC_HI && FL_OTA_LO >= 
                "SMK: the update record (the OTA area) lies in the loader's record window, below BTIF");
 _Static_assert(FL_APP_HI <= FL_DATA_LO && FL_DATA_HI <= FL_OTA_LO, "SMK: windows overlap");
 
-/* the store, and the app's big data */
-#define FL_STORE_OK(off, n) FL_IN(off, n, FL_DATA_LO, FL_DATA_HI)
+/* the store (the VM; an app's store objects may also lie in USRFLASH, its big-data window: both are the app's), and
+ * the app's big data */
+#define FL_STORE_OK(off, n) (FL_IN(off, n, FL_DATA_LO, FL_DATA_HI) || FL_IN(off, n, FL_XDATA0_LO, FL_XDATA0_HI))
 #define FL_XDATA_OK(off, n) FL_IN(off, n, FL_XDATA0_LO, FL_XDATA0_HI)
 /* where the RAM driver may erase / program: the app's windows, the staging, the stock marker's sector (whole); the
  * update loader defines its own (loader.c) */
