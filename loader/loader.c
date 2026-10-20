@@ -12,13 +12,24 @@
 #define FELUCCA_OTA 1
 #define FELUCCA_OTA_DRYRUN 0
 #define FELUCCA_USB_PID 0x0002
+#include "fm1_cc.h"                             /* BOARD_SMK37 */
+#if BOARD_SMK37
+#define FELUCCA_ID "ota-" SMK_MODEL "_900"      /* (SMK-37: its model's name; hosts look for "ota-") */
+#else
 #define FELUCCA_ID "ota-FM-1_900"
+#endif
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #include "fm1_time.h"
 #include "fm1_sys.h"
 /* the loader may write the app area and erase update records; never the head, nor Felucca's store
  * [0x97000, 0xE0000) (user data, never a record: ldr_core.c) */
+#if BOARD_SMK37
+/* SMK-37: the app area 0x4000..0x9CFFF, records in the VM 0x9D000..0xBFFFF only (fm1_flash_smk37.h); the RAM driver
+ * refuses every protected range on its own too (FL_GUARD) */
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_APP_LO, FL_APP_HI) || FL_IN(off, n, FL_REC_LO, FL_REC_HI))
+#else
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, 0x4000u, 0x97000u) || FL_IN(off, n, 0xE0000u, 0xFC000u))
+#endif
 #include "fm1_flash.h"
 #include "../chip/libc.c"
 #include "../chip/usb.c"

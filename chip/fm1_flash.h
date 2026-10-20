@@ -36,6 +36,9 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
 #define T4_CNT          REG32(0x10804u)            /* TIMER4, 24 MHz free-running */
 
 #define FL_XIP(off)     FM1_XIP(off)              /* fm1_xip.h */
+#if BOARD_SMK37
+#include "fm1_flash_smk37.h"                      /* the SMK-37's map: its windows, guards and protected ranges */
+#else
 #define FL_DATA_LO      0x00097000u                /* Felucca main store */
 #define FL_DATA_HI      0x000E0000u
 #define FL_GLOB_LO      0x000FC000u                /* Felucca superblock / globals */
@@ -64,6 +67,8 @@ static inline void *fl_far(void *p) { void *volatile q = p; return q; }
  * data regions; the update loader (firmware/loader) defines its own window. */
 #ifndef FL_RANGE_OK
 #define FL_RANGE_OK(off, n) (FL_STORE_OK(off, n) || FL_XDATA_OK(off, n) || FL_IN(off, n, FL_OTA_LO, FL_OTA_HI))
+#endif
+#define FL_PLAIN_LO     0x00093000u                /* the plain XIP window (fl_plain_window_init) */
 #endif
 
 typedef struct { uint32_t sfc_con, spi_con; } fl_saved_t;
@@ -179,7 +184,11 @@ static RAMFN uint32_t fl_status_ram(void)                /* SR1 | SR2 << 8 */
 static RAMFN int fl_erase4k_ram(uint32_t off, uint32_t *took_us)
 {
     fl_saved_t s; int rc;
+#if BOARD_SMK37
+    if (!FL_GUARD(off, 0x1000u) || (off & 0xFFFu))   /* (the allow-list and a second net: fm1_flash_smk37.h) */
+#else
     if (!FL_RANGE_OK(off, 0x1000u) || (off & 0xFFFu))
+#endif
         return -1;
     if (fl_enter(&s)) return -2;
     fl_wren();
@@ -196,7 +205,11 @@ static RAMFN int fl_erase4k_ram(uint32_t off, uint32_t *took_us)
 static RAMFN int fl_prog_ram(uint32_t off, const uint8_t *src, uint32_t n, uint32_t *took_us)
 {
     fl_saved_t s; int rc; uint32_t i;
+#if BOARD_SMK37
+    if (!FL_GUARD(off, n) ||
+#else
     if (!FL_RANGE_OK(off, n) ||
+#endif
         n == 0 || n > 256u || ((off & 0xFFu) + n) > 256u) return -1;    /* one page, no wrap */
     if (fl_enter(&s)) return -2;
     fl_wren();
@@ -230,11 +243,19 @@ static RAMFN int fl_read_ram(uint32_t off, uint8_t *dst, uint32_t n)   /* 0x0B f
 static void fl_plain_window_init(void)
 {
     SFCENC_CON &= (uint8_t)~2u;
+#if BOARD_SMK37
+    SFCENC_UNENC_L = FL_XIP(FL_PLAIN_LO);         /* SMK: 0x02099000 (0x9D000) */
+#else
     SFCENC_UNENC_L = FL_XIP(0x93000u);            /* 0x0208F000 */
+#endif
     SFCENC_UNENC_H = 0x07FFFFFFu;
     SFCENC_CON |= 2u;
     __asm__ volatile("cli" ::: "memory");
+#if BOARD_SMK37
+    fl_inval(FL_PLAIN_LO, 0x100000u - FL_PLAIN_LO);   /* drop any decrypted lines */
+#else
     fl_inval(0x93000u, 0x100000u - 0x93000u);     /* drop any decrypted lines */
+#endif
     __asm__ volatile("csync\n\tsti" ::: "memory");
 }
 

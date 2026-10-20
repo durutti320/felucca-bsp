@@ -22,9 +22,21 @@
  *   ota_show(step, code)       progress / result for the screen
  *   ota_commit(parm)           write RAM record + reset (never returns on hardware)
  */
+#if BOARD_SMK37
+/* SMK-37: the last 5 sectors of the stock VM (0xBB000..0xBFFFF, fm1_flash_smk37.h FL_OTA), below BTIF / USRTRIM
+ * 0xC0000..0xC1FFF; the update loader may drop records only below 0xC0000 (ldr_core.c). A package is taken only if its
+ * flash.bin is exactly this board's [0, the app area end): an FM-1 package is refused before anything is erased */
+#define OTA_AREA 0x000BB000u                     /* staged loader, 5 x 4 KiB */
+#define OTA_AREA_LEN 0x5000u
+#define OTA_RES (OTA_AREA + OTA_AREA_LEN - 0x100u)  /* 0xBFF00 = 4K boundary - 256: SPL scan */
+#define OTA_FL_LEN 0x9D000u                      /* flash.bin = [0, the PRCT end) (ldr_core.c LDR_APP_HI) */
+#define OTA_PARM_ID "ota-" SMK_MODEL "_016"       /* the stock app's parm identity (Pro 18 B, Elite 20 B) */
+_Static_assert(OTA_AREA + OTA_AREA_LEN <= 0xC0000u && OTA_AREA >= 0x9D000u, "SMK: OTA area outside the VM");
+#else
 #define OTA_AREA 0x000E0000u                     /* staged loader, 5 x 4 KiB */
 #define OTA_AREA_LEN 0x5000u
 #define OTA_RES (OTA_AREA + OTA_AREA_LEN - 0x100u)  /* 0xE4F00 = 4K boundary - 256: SPL scan */
+#endif
 #define OTA_LDR_HCRC 0xEBAAu                     /* official update loader (usb_hid_ota.bin) */
 #define OTA_LDR_DCRC 0x5881u
 #define OTA_LDR_LEN 0x4DE1u
@@ -269,6 +281,10 @@ static int ota_stage(void)                       /* steps 1..6; 0 = host said su
         return rc;
     if (!fl_off || !ota_off)
         return -3;
+#if BOARD_SMK37
+    if (fl_len != OTA_FL_LEN)
+        return -15;                                         /* another board's package: nothing staged, nothing erased */
+#endif
     /* 2. which loader: the official one (known CRCs; it rewrites the whole flash.bin
      *    including the head) or Felucca's own (app area only, checks the chip key) */
     if (ota_read(ota_off, b, 512))
@@ -348,6 +364,9 @@ static int ota_session(void)
     ota_deadline = ota_now_ms() + 120000u;          /* step 1 normally takes ~5 s; a stalled host gives up after 2 min */
     rc = ota_stage();
     if (rc) {
+#if BOARD_SMK37
+        if (rc != -15)                              /* (another board's package, refused before staging: nothing to erase) */
+#endif
         ota_unstage();
         ota_show(9, rc);
         return rc;
@@ -358,8 +377,13 @@ static int ota_session(void)
     ota_wr16(parm + 2, 0x5A0Du);
     ota_wr16(parm + 4, 0x5A01u);
     ota_wr16(parm + 6, 0x5441u);
+#if BOARD_SMK37
+    for (i = 0; i < sizeof OTA_PARM_ID - 1u; i++)    /* (Pro 18 B, Elite 20 B; zero up to +0x27) */
+        parm[8 + i] = (uint8_t)OTA_PARM_ID[i];       /* the loader's own USB identity */
+#else
     for (i = 0; i < 12u; i++)
         parm[8 + i] = (uint8_t)"ota-FM-1_015"[i];    /* the loader's own USB identity */
+#endif
     ota_wr32(parm + 72, OTA_AREA);
     ota_wr16(parm, ota_crc16(parm + 2, 78, 0));
 #if FELUCCA_OTA_DRYRUN
