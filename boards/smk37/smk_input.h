@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * SMK-37 Pro port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro)
- * (from genkigenki/Felucca branch smk37, firmware/hal; carried into felucca-bsp boards/smk37 unchanged) */
+ * (from genkigenki/Felucca branch smk37, firmware/hal; carried into felucca-bsp boards/smk37 with one hook: SMK_PAD_EVENT) */
 /* SMK-37 Pro input HAL: velocity keybed, buttons, encoders, button LEDs, pads, faders, wheels.
  * The FM-1 counterpart is fm1_input.h + fm1_adc.h; this header keeps their API (fm1_in, fm1_input_init,
  * fm1_input_tick, fm1_input_scan, fm1_enc_take, fm1_input_edges, fm1_input_note_edges, fm1_led_key) so
@@ -438,6 +438,10 @@ static void fm1__frame(void)
 
 static void smk__padq(uint32_t pad, uint32_t vel)     /* a pad hit (vel) or release (0): its white key */
 {
+#ifdef SMK_PAD_EVENT
+    SMK_PAD_EVENT(pad, vel);                          /* (felucca-bsp: the platform takes the pads as pads, never keys) */
+    return;
+#endif
     int32_t n0 = smk_pad_piano ? SMK_PIANO_NOTE[pad] : (int32_t)SMK_WHITE_NOTE[SMK_WHITE_OF_PAD(pad)];
     uint32_t n, bit;
     if (vel) {
