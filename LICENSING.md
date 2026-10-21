@@ -42,3 +42,12 @@ hash, neither in this repository. Packages built by `fm1pkg.py` contain three fi
 The JieLi SDK is never copied into this repository. `tools/get_sdk.sh` fetches it from JieLi's repository at a fixed revision and
 checks the hashes of the files this repository depends on. Its libraries (`*.a`) carry no separate licence statement
 of their own in the SDK; the SDK as a whole is declared Apache-2.0. That has not been confirmed with JieLi.
+
+## The SMK-37 board (a fork's branch `smk37`)
+
+`boards/smk37/` (except `fm1_audio.h`, a copy of the FM-1's) and `chip/fm1_flash_smk37.h` come from genkigenki's
+SMK-37 layer for Felucca (Felucca branch `smk37`; [fm1-to-smk37](https://github.com/genkigenki/fm1-to-smk37)). They
+are **GPL-3.0-only** (`LICENSES/GPL-3.0-only.txt`), as their headers say, and stay in files of their own; the MPL-2.0
+files around them carry only small `BOARD_SMK37` switches. A firmware built with `BOARD_SMK37` is therefore shared
+under the GPL. The FM-1 build uses none of these files. Upstreaming them needs their author's permission to relicense
+them under MPL-2.0.

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
- * SMK-37 port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro); felucca-bsp board: LOOM-8 SMK port */
+ * SMK-37 port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro); felucca-bsp board: Cam Durnsford (FLY) */
 /* The SMK-37's board (BOARD_SMK37; the build puts boards/smk37 on the include path in place of boards/fm1): the
  * input HAL keeps fm1_input.h's API (fm1_in, fm1_input_init, fm1_input_tick, fm1_enc_take, fm1_input_edges, fm1_led)
  * and adds the SMK's extras (velocity, pads, faders, wheels): smk_input.h, from genkigenki's SMK-37 layer for Felucca

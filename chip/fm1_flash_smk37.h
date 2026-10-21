@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
- * SMK-37 Pro port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro); felucca-bsp's windows: LOOM-8 SMK port */
+ * SMK-37 Pro port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro); felucca-bsp's windows: Cam Durnsford (FLY) */
 /* The SMK-37's flash map (BOARD_SMK37; fm1_flash.h includes it in place of the FM-1's): which ranges the RAM flash
  * driver may erase or program, in felucca-bsp's names (FL_DATA, FL_XDATA, FL_OTA). From genkigenki's SMK-37 layer for
  * Felucca (genkigenki/Felucca branch smk37, firmware/hal/fm1_flash_map.h; hardware notes:
