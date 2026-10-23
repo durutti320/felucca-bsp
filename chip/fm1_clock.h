@@ -25,10 +25,23 @@
 #define CLK_PLL1_CON0 REG32(0x119A8u)                   /* [1:0] enable, run; [6:2] reference divider - 2 */
 #define CLK_PLL1_CON1 REG32(0x119ACu)                   /* [11:0] multiplier - 2 */
 #define CLK_T4_CNT    REG32(0x10804u)                   /* TIMER4, 24 MHz from the crystal (fm1_time.h) */
+#define CLK_PLL0_CON0 REG32(0x119A0u)                   /* the PLL m-bootloader starts before PLL1 (0x45400200, */
+#define CLK_PLL0_CON1 REG32(0x119A4u)                   /* 0x3F503026; running, 0x45400203, under M-VAVE's too) */
 #define CLK_STOCK_SYS   6u
 #define CLK_STOCK_PLL0  0x0940022Bu
 #define CLK_STOCK_PLL1  0x0750310Cu
 #define CLK_STOCK_HSB   0x00010200u
+
+/* the clock's registers as they are (a report): the system clock's source, the mux, PLL1, the other PLL */
+static inline void fm1_clock_read(uint32_t r[6])
+{
+    r[0] = CLK_SYS_CON & 0xFFu;
+    r[1] = CLK_MUX_CON;
+    r[2] = CLK_PLL1_CON0;
+    r[3] = CLK_PLL1_CON1;
+    r[4] = CLK_PLL0_CON0;
+    r[5] = CLK_PLL0_CON1;
+}
 
 static inline int fm1_clock_is_stock(void)
 {
