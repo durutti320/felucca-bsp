@@ -16,6 +16,13 @@ chip/usb.c comes from Felucca, where it is GPL-3.0-only; only the include path o
 is MPL-2.0: its MIDI clock and transport sync is keremimo's (Felucca commit 019e2ad), licensed under MPL-2.0 by
 agreement: https://github.com/hugelton/felucca-bsp/pull/3
 
+The second core (chip/fm1_cpu1.h, chip/fm1_cpu1.S, chip/fm1_cpu1_stop.h, its fault path in chip/fm1_irq.h and
+chip/fm1_vec.S) comes from Melodee (https://github.com/keremimo/melodee, GPL-3.0-only there) by Kerem Kilic
+(keremimo), licensed under MPL-2.0 by agreement: https://github.com/hugelton/felucca-bsp/issues/5. Its safe hold
+adapts Felucca 1.6.1's fm1_cpu1_halt (https://github.com/hugelton/Felucca/pull/247). The units whose second core
+misreads shared RAM were measured by Jangada's maintainer (zednaked, https://github.com/zednaked/jangada,
+charlesvestal/fm1-x0x#10); those measurements are credited, no code of Jangada's is included.
+
 The history of these files comes from Felucca (https://github.com/hugelton/Felucca), where
 they were first published under GPL-3.0-only by the same copyright holder. Each commit
 message names the Felucca commit it was taken from. Releases of Felucca that already
