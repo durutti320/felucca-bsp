@@ -25,14 +25,18 @@
  * github.com/zednaked/jangada): on some FM-1s CPU1 now and then reads shared RAM wrong (0x00200000 where it holds
  * 0), more often under load. So CPU1 runs only the next job, and only when its check word (the function, the
  * argument and the job's number, written before the job) matches; the jobs it finished stay in a register. A
- * misread, a fault on CPU1, or a job not back in FM1_CPU1_TIMEOUT_US retires it: held, and CPU0 does the work
- * alone (the job is dropped, never run twice). Retired, or CPU0 crashed while CPU1 ran (its data can go bad too,
- * where no check reaches): barred, one core at every start until power-off (fm1_cpu1_bar, .noinit; nothing written
- * to the flash on a unit that may be unstable). fm1_cpu1_bar_build gives a new build two cores again.
+ * misread, a fault on CPU1, a job not back in FM1_CPU1_TIMEOUT_US, or a start it does not answer is a failure:
+ *   FM1_CPU1_FALLBACK 0 (the default; Melodee's releases): no fallback to one core. CPU1 is held, the failure goes
+ *     in the crash record (fm1_crash: vec 0x100 + FM1_CPU1_*, pc the faulting pc or the misread job, dbg DBG_MSG,
+ *     sp the misreads), and the FM-1 restarts; the boot guard (two failed starts: safe mode) covers a unit that cannot run it
+ *   FM1_CPU1_FALLBACK 1: CPU1 is retired: held, and CPU0 does the work alone (the job is dropped, never run twice).
+ *     Retired, or CPU0 crashed while CPU1 ran (its data can go bad too, where no check reaches): barred, one core
+ *     at every start until power-off (fm1_cpu1_bar, .noinit; nothing written to the flash on a unit that may be
+ *     unstable). fm1_cpu1_bar_build gives a new build two cores again.
  *
- *   fm1_cpu1_start()        0 = it runs and answered; -1 = held (barred, or it did not report in)
+ *   fm1_cpu1_start()        0 = it runs and answered; -1 = held (barred, or it did not report in: FALLBACK only)
  *   fm1_cpu1_run(fn, arg)   1 = it has fn(arg); 0 = do it yourself (off, or a job outstanding)
- *   fm1_cpu1_wait()         0 = done; -1 = retired, the job dropped (do it yourself)
+ *   fm1_cpu1_wait()         0 = done; -1 = retired, the job dropped (do it yourself; FM1_CPU1_FALLBACK only)
  *   fm1_cpu1_busy()         1 = the job handed over is not done yet (0 after a misread or a fault: wait)
  *   fm1_cpu1_check()        retire it if it misread or faulted while idle (run does it too)
  *   fm1_cpu1_stop()         hold it (fm1_cpu1_stop.h: registers only)
@@ -48,7 +52,11 @@
 #include "fm1_irq.h"
 #include "fm1_guard.h"
 #include "fm1_cpu1_stop.h"
+#include "fm1_sys.h"
 
+#ifndef FM1_CPU1_FALLBACK
+#define FM1_CPU1_FALLBACK 0                     /* 1: one core after a failure, instead of a restart */
+#endif
 #ifndef FM1_CPU1_TIMEOUT_US
 #define FM1_CPU1_TIMEOUT_US 8000u               /* a job not back by then: far past any audio block, or it faulted */
 #endif
@@ -89,7 +97,10 @@ static struct { volatile uint32_t count; uint32_t echoes, cpu, dbg, emu, pc, ret
 /* one core until power-off. Not static, as fm1_crash: the compiler must not assume a zero start */
 #define FM1_CPU1_BAR_MAGIC 0x52414231u          /* "1BAR" */
 struct { uint32_t magic, barred, build; } fm1_cpu1_bar __attribute__((section(".noinit")));
-static inline int fm1_cpu1_barred(void) { return fm1_cpu1_bar.magic == FM1_CPU1_BAR_MAGIC && fm1_cpu1_bar.barred == 1u; }
+static inline int fm1_cpu1_barred(void)
+{
+    return FM1_CPU1_FALLBACK && fm1_cpu1_bar.magic == FM1_CPU1_BAR_MAGIC && fm1_cpu1_bar.barred == 1u;
+}
 static inline void fm1_cpu1_bar_set(void)
 {
     fm1_cpu1_bar.magic = FM1_CPU1_BAR_MAGIC;
@@ -147,9 +158,33 @@ void __attribute__((section(".c1_text"), noreturn, used)) fm1_cpu1_main(void)
     }
 }
 
-/* CPU0: hold it for good (until power-off) and work alone; a job it may have been running is dropped */
+/* CPU0, no fallback: hold it, the failure into the crash record (as fm1_fault_c writes it), and restart */
+static void __attribute__((noreturn)) fm1_cpu1_failure(uint32_t why, uint32_t pc, uint32_t dbg)
+{
+    uint32_t count = fm1_crash.magic == FM1_CRASH_MAGIC ? fm1_crash.count : 0;
+    __asm__ volatile("cli" ::: "memory");
+    fm1_cpu1_stop();
+    fm1_crash.magic = FM1_CRASH_MAGIC;
+    fm1_crash.count = count + 1u;
+    fm1_crash.vec = 0x100u + why;
+    fm1_crash.pc = pc;
+    fm1_crash.rets = fm1_cpu1_fault.rets;
+    fm1_crash.emu = fm1_cpu1_fault.emu;
+    fm1_crash.dbg = dbg;
+    fm1_crash.sp = fm1_cpu1_mb.rejected;
+    fm1_crash.uptime_ms = fm1_uptime_ms();
+    fm1_reboot();
+    for (;;)
+        ;
+}
+
+/* CPU0: a failure. Without the fallback, a restart; with it, held for good (until power-off) and CPU0 works alone
+ * (a job it may have been running is dropped) */
 static void fm1_cpu1_retire(uint32_t why)
 {
+    if (!FM1_CPU1_FALLBACK)
+        fm1_cpu1_failure(why, why == FM1_CPU1_FAULT ? fm1_cpu1_fault.pc : fm1_cpu1_mb.misread,
+                         why == FM1_CPU1_FAULT ? fm1_cpu1_fault.dbg : 0u);
     fm1_cpu1_stop();
     fm1_cpu1_bar_set();
     fm1_cpu1_on = 0;
@@ -208,6 +243,8 @@ static int fm1_cpu1_start(void)
     FM1_C0_WR_LIMIT_EN |= top;
     fm1__dbg_lock();
     if (!fm1_cpu1_mb.ready) {
+        if (!FM1_CPU1_FALLBACK)
+            fm1_cpu1_failure(FM1_CPU1_SILENT, 0u, 0u);
         fm1_cpu1_gave_up = FM1_CPU1_SILENT;
         return -1;
     }
@@ -287,8 +324,8 @@ static uint32_t fm1_cpu1_stack_used(void)
  * the exception on CPU0, whose own state is intact: CPU1 is held, the fault recorded, and CPU0 retires it at its
  * next look (fm1_cpu1_wait, _check) and goes on. CPU1 can also take the exception itself (a misread pointer it
  * called): it records it and parks until CPU0 holds it (the crash screen and fm1_reboot on CPU1 would hold CPU1
- * itself: a frozen FM-1). Only CPU0 can finish restoring the debug guards after a hold. CPU0's own crash beside a
- * running CPU1 bars it */
+ * itself: a frozen FM-1). Only CPU0 can finish restoring the debug guards after a hold. Without the fallback, CPU0
+ * restarts there (fm1_cpu1_failure). With it, CPU0's own crash beside a running CPU1 bars it */
 static int fm1_cpu1_fault_c(const uint32_t *f)
 {
     uint32_t cpu = fm1_cnum(), dbg = FM1_DBG_MSG, was;
@@ -323,9 +360,11 @@ static int fm1_cpu1_fault_c(const uint32_t *f)
         for (;;)
             ;
     }
+    if (!FM1_CPU1_FALLBACK)
+        fm1_cpu1_failure(FM1_CPU1_FAULT, f[16], dbg);
     return 1;
 own:
-    if (fm1_cpu1_on)
+    if (FM1_CPU1_FALLBACK && fm1_cpu1_on)
         fm1_cpu1_bar_set();
     return 0;
 }
