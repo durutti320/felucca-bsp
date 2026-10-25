@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Kerem Kilic (Ellic Studio)
- * Portions Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Kerem Kilic (Ellic Studio) — USB host integration
  * MIDI clock and transport sync: keremimo (Felucca 019e2ad), under MPL-2.0 by agreement: https://github.com/hugelton/felucca-bsp/pull/3 */
 /* USB full-speed device on USB0: a
  * class-compliant USB-MIDI interface. All SIE traffic happens in one place,
@@ -1661,9 +1661,11 @@ static void usb_detach(void)
 {
     usb.detached = 1;
     usb.up = 0;
+    RING_PUBLISH();
 #if FELUCCA_USB_HOST
     if (uh.on) uh_session_end();
     uh.want = uh.on = 0;
+    RING_PUBLISH();
 #endif
     fm1_usb_off();
 }

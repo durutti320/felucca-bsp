@@ -57,6 +57,12 @@ CC wiring and power negotiation depend on the board and adapter. Low-speed devic
 nested hubs, MIDI 2.0, controller SysEx and device-specific LED protocols are not
 supported. While one device is active, another hub port is not scanned.
 
+Unsupported or unresponsive direct devices are probed once per attachment; unplug/replug
+or toggle host mode to try again. Idle hubs remain configured and check one port's
+connection-change status every 100 ms, probing only changed connections. Empty hubs
+and non-MIDI devices do not cause periodic bus resets or power-good waits. A hub
+that stops answering waits for root unplug/replug or a host-mode toggle.
+
 OUT DMA and queue slots are retained until ACK. NAK/transient errors retry the same
 packet/toggle. A stall, 16 errors or 500 ms without completion stops the session and
 returns recovery to the main loop. Input back-pressure leaves RX data pending.
@@ -69,6 +75,7 @@ Run `tests/run_usb_host_tests.sh` with a host C compiler. It runs the production
 USB source against a keyboard/hub/storage SIE model under ASan/UBSan: parsing,
 malformed/truncated descriptors, full input ring, direct/hub duplex I/O, ACK-owned
 output, NAK/errors/stalls/timeouts, input/output-only endpoints, disconnect/reconnect,
+idle hubs and unsupported devices without repeated resets/waits, downstream hot-plug,
 audio/CDC mode handover, host-disabled builds and forced device-only loaders.
 
 Melodee's original host input was reported working by its contributor and maintainer.

@@ -12,8 +12,9 @@ package header. No vendor code is intended to be included.
 Switching the divide-by-zero trap off in chip/fm1_irq.h follows a fix proposed by Steve Pinkham
 (spinkham) for Felucca (pull request 111). The code and the comment here are written independently.
 
-chip/usb.c comes from Felucca, where it is GPL-3.0-only; only the include path of one header was changed. Here it
-is MPL-2.0: its MIDI clock and transport sync is keremimo's (Felucca commit 019e2ad), licensed under MPL-2.0 by
+chip/usb.c comes from Felucca, where it is GPL-3.0-only. The device driver retains Leo Kuroshita's
+copyright; Kerem Kilic adapted the include path and added the BSP host integration. Here it is
+MPL-2.0: its MIDI clock and transport sync is keremimo's (Felucca commit 019e2ad), licensed under MPL-2.0 by
 agreement: https://github.com/hugelton/felucca-bsp/pull/3
 
 The second core (chip/fm1_cpu1.h, chip/fm1_cpu1.S, chip/fm1_cpu1_stop.h, its fault path in chip/fm1_irq.h and
@@ -39,6 +40,8 @@ https://github.com/keremimo/melodee at e9eab97a5bd93c7e2f38bca7aae5006e59f21148,
 - 198c8fd4383a19fa8d53f8db988babfffe366b2e: Adrien's input-toggle and retry fixes.
 - b4380f9474e18d1437f33ad84459c86a8458e815: Kerem's MIDI output, endpoint validation, ACK ownership and recovery tests.
 - eb57309540ee5a9f92e9b5188ac3ace478fa34db: Kerem's disconnect debounce.
+- 44a311a57b957ca088027d4045f289665ba26b20: Kerem's idle probe/hub connection-change fixes
+  and regression tests, backported after the initial source snapshot.
 Adrien agreed to MPL licensing for his contributions in response to the MPL request:
 https://github.com/keremimo/melodee/pull/75#issuecomment-6384184014
 Kerem licenses his contributions to this port under MPL-2.0 as well. The original
