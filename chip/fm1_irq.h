@@ -60,7 +60,9 @@ fm1_crash_t fm1_crash __attribute__((section(".noinit")));
 
 /* the registers at the last crashes, the oldest overwritten: which register held what when the CPU faulted (a
  * pointer one bit off with the memory it came from intact, sp a word off). count is the crash's fm1_crash.count */
-#define FM1_CRASH_CTX_N 4u
+#ifndef FM1_CRASH_CTX_N
+#define FM1_CRASH_CTX_N 4u                        /* a firmware short of .noinit may keep fewer (80 B each) */
+#endif
 typedef struct {
     uint32_t count, pc, r[16], usp, ssp;
 } fm1_crash_ctx_t;
