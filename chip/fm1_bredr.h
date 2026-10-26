@@ -223,6 +223,18 @@ extern void isr_bti_bt(void);
 extern void isr_bti_slot(void);
 
 /* IRQs off (boot): both vectors at prio, held in the interrupt controller until the block is up */
+#ifndef FM1_IRQ_HOLD_DEFINED
+#define FM1_IRQ_HOLD_DEFINED
+/* one line masked (hold 1) or let go (0) in the interrupt controller, its priority kept (felucca-bsp's fm1_irq.h has
+ * fm1_irq_mask / fm1_irq_unmask) */
+static void fm1_irq_hold(uint32_t n, int hold)
+{
+    if (hold)
+        fm1_irq_mask(n);
+    else
+        fm1_irq_unmask(n);
+}
+#endif
 static void fm1_br_irq_attach(uint32_t prio)
 {
     fm1_irq_attach(FM1_IRQ_BREDR, isr_bti_bt, prio);
