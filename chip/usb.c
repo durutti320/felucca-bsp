@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
+ * Copyright (C) 2026 Kerem Kilic (Ellic Studio) — USB host integration
  * MIDI clock and transport sync: keremimo (Felucca 019e2ad), under MPL-2.0 by agreement: https://github.com/hugelton/felucca-bsp/pull/3 */
 /* USB full-speed device on USB0: a
  * class-compliant USB-MIDI interface. All SIE traffic happens in one place,
@@ -26,8 +27,17 @@
  * FELUCCA_UAC_OUT=1 (with FELUCCA_UAC) adds a USB audio output too: the computer plays through the FM-1 (16-bit
  * stereo, 44.1 kHz, EP4 OUT isochronous adaptive). uac_service takes each packet into a ring (nested in the render
  * too); uac_play, after each render, adds it to the output, resampled to the I2S clock (~44,117.6 Hz): the ring's
- * fill steers the rate, so it neither runs dry nor overflows. */
+ * fill steers the rate, so it neither runs dry nor overflows.
+ * FELUCCA_USB_HOST=1 adds opt-in MIDI host mode; see docs/USB_HOST.md for the main-loop contract. */
 #include "fm1_usb.h"   /* registers (chip/) */
+/* Host is opt-in and excluded from update loaders, even with a global build flag. */
+#ifndef FELUCCA_USB_HOST
+#define FELUCCA_USB_HOST 0
+#endif
+#ifdef FELUCCA_LOADER
+#undef FELUCCA_USB_HOST
+#define FELUCCA_USB_HOST 0
+#endif
 #ifndef FELUCCA_CDC
 #define FELUCCA_CDC 0
 #endif
@@ -40,11 +50,16 @@
 #ifndef FELUCCA_UAC_OUT
 #define FELUCCA_UAC_OUT 0
 #endif
+#ifndef FELUCCA_UAC_AS_FIRST
+#define FELUCCA_UAC_AS_FIRST 0
+#endif
 #if !FELUCCA_UAC
 #undef FELUCCA_UAC_48K
 #define FELUCCA_UAC_48K 0
 #undef FELUCCA_UAC_OUT
 #define FELUCCA_UAC_OUT 0
+#undef FELUCCA_UAC_AS_FIRST
+#define FELUCCA_UAC_AS_FIRST 0
 #endif
 enum { S_FADDR = 0, S_POWER = 1, S_INTRTX1 = 2, S_INTRTX2 = 3, S_INTRRX1 = 4, S_INTRRX2 = 5, S_INTRUSB = 6,
        S_INTRTX1E = 7, S_INTRTX2E = 8, S_INTRRX1E = 9, S_INTRRX2E = 10, S_INTRUSBE = 11, S_FRAME1 = 12,
@@ -235,6 +250,9 @@ static uint32_t midi_in_ms[MQ];
 static uint8_t midi_in_source[MQ];                    /* 1 USB, 2 TRS */
 static volatile uint32_t fm1_ms;                    /* also declared by core.h; parser-only host tests */
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
+static volatile uint8_t midi_usb_lost;                  /* consume in the app: release USB input owners */
+static uint32_t usb_retry_ms;
+static int usb_midi_out_ready(void);
 static volatile uint8_t midi_in_overflow;               /* audio ISR discards a broken stream and releases notes */
 
 static int midi_enqueue(uint32_t pkt, uint32_t source)
@@ -254,19 +272,22 @@ static int midi_enqueue(uint32_t pkt, uint32_t source)
     return 1;
 }
 
-static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
+/* Returns 0 when disconnected or full; the application retains responsibility for unsent releases. */
+static int midi_out_try(uint32_t pkt)                /* from the audio ISR */
 {
-    if (usb.config && mo_w - mo_r < MQ) {
-        midi_out_q[mo_w % MQ] = pkt;
-        RING_PUBLISH();
-        mo_w++;
-    }
+    if (!usb_midi_out_ready() || mo_w - mo_r >= MQ)
+        return 0;
+    midi_out_q[mo_w % MQ] = pkt;
+    RING_PUBLISH();
+    mo_w++;
+    return 1;
 }
+static void midi_out_event(uint32_t pkt) { (void)midi_out_try(pkt); }
 static volatile uint32_t midi_links;                /* counts up at each new connection (SET_CONFIGURATION 1) */
 static uint32_t midi_out_link(void) { return midi_links; }
 static uint32_t midi_out_room(void)                  /* free slots in the out ring (0: no host) */
 {
-    return usb.config ? MQ - (mo_w - mo_r) : 0u;
+    return usb_midi_out_ready() ? MQ - (mo_w - mo_r) : 0u;
 }
 
 /* ------------------------------------------------------- descriptors --- */
@@ -274,7 +295,8 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
  * and, with FELUCCA_CDC, the CDC-ACM console (communication + data). The endpoints never move:
  * EP1 MIDI, EP2 CDC notify, EP3 CDC data, EP4 audio.
  * bcdDevice: 3.00 MIDI, +0.10 the audio input (+0.20 since 1.1: 44.1 and 48 kHz, FELUCCA_UAC_48K), +0.40 the
- * audio output (FELUCCA_UAC_OUT), +0.01 CDC
+ * audio output (FELUCCA_UAC_OUT), +0.08 the audio streaming interfaces first in the AC collection
+ * (FELUCCA_UAC_AS_FIRST), +0.01 CDC
  * (+0.02 per FELUCCA_USB_LAYOUT step, so a host never reuses what it learnt about another layout).
  * FELUCCA_USB_LAYOUT, how the CDC build presents itself (#67: macOS 13-15 attach Apple's CDC composite
  * driver to a misc / IAD device that has a CDC function, and their kernel audio driver then never
@@ -312,11 +334,25 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
 #else
 #define FMT_LEN 0
 #endif
+/* the AC header's collection (FELUCCA_UAC_AS_FIRST=1, Felucca since 1.5.1, its #67): the audio streaming
+ * interfaces first, then the MIDI one. The kernel AppleUSBAudio (macOS up to 15; its last published source,
+ * AppleUSBAudio-273.4.1, AUAConfigurationDictionary::parseConfigurationDescriptor) drops a MIDI streaming
+ * interface from the collection while it walks it with the count from bInCollection: with MIDI listed first, the
+ * next look-up runs past the shortened list, the parser gives up before the audio streaming interface and no
+ * audio device appears (MIDI still works). Listed last, MIDI is dropped at the end of the walk. The class spec
+ * gives the order no meaning (Linux takes each listed interface on its own). 0 (the default): MIDI first. */
+#if FELUCCA_UAC_AS_FIRST
+#define AC_COLL2(a) (a) + 2, (a) + 1
+#define AC_COLL3(a) (a) + 2, (a) + 3, (a) + 1
+#else
+#define AC_COLL2(a) (a) + 1, (a) + 2
+#define AC_COLL3(a) (a) + 1, (a) + 2, (a) + 3
+#endif
 #if FELUCCA_UAC
 #if FELUCCA_UAC_OUT
 #define D_AC(a)                                                                                      \
     9, 4, (a), 0, 0, 1, 1, 0, 0,                                                                     \
-    11, 0x24, 1, 0x00, 0x01, 53, 0, 3, (a) + 1, (a) + 2, (a) + 3,   /* AC header: MIDI, both streams */  \
+    11, 0x24, 1, 0x00, 0x01, 53, 0, 3, AC_COLL3(a),        /* AC header: MIDI, both streams */          \
     12, 0x24, 2, 1, 0x03, 0x06, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 1: line, 2 ch (L R) */      \
     9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */ \
     12, 0x24, 2, 3, 0x01, 0x01, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 3: USB streaming, 2 ch */   \
@@ -331,7 +367,7 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
 #else
 #define D_AC(a)                                                                                      \
     9, 4, (a), 0, 0, 1, 1, 0, 0,                                                                     \
-    10, 0x24, 1, 0x00, 0x01, 31, 0, 2, (a) + 1, (a) + 2,   /* AC header 1.00: MIDI + audio streaming */ \
+    10, 0x24, 1, 0x00, 0x01, 31, 0, 2, AC_COLL2(a),        /* AC header 1.00: MIDI + audio streaming */ \
     12, 0x24, 2, 1, 0x03, 0x06, 0, 2, 0x03, 0x00, 0, 0,    /* input terminal 1: line, 2 ch (L R) */      \
     9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                    /* output terminal 2: USB streaming, from 1 */
 #define D_ASO(o)
@@ -374,7 +410,7 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
     7, 5, 0x03, 2, 64, 0, 0,                               /* EP3 OUT bulk */                           \
     7, 5, 0x83, 2, 64, 0, 0,                               /* EP3 IN bulk */
 #define CDC_LEN 66                                         /* with its IAD */
-#define BCD_LO(cdc) (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x40 * FELUCCA_UAC_OUT + \
+#define BCD_LO(cdc) (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x40 * FELUCCA_UAC_OUT + 0x08 * FELUCCA_UAC_AS_FIRST + \
                      ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0))
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
     18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF, \
@@ -997,6 +1033,16 @@ static int ep1_take(const uint8_t *b, uint32_t n)
     return 1;
 }
 
+#include "usb_host.c"
+
+static int usb_midi_out_ready(void)
+{
+#if FELUCCA_USB_HOST
+    if (uh.on) return uh.run && uh.out_mps;
+#endif
+    return usb.config;
+}
+
 static void ep1_rx(void)                                /* leaves the packet (NAK) while the ring is too full */
 {
     uint32_t csr, n;
@@ -1495,6 +1541,12 @@ static void uac_service(void)
 static void usb_poll(void)                              /* TIMER5 ISR, 2 kHz */
 {
     uint32_t iu, it, ir;
+#if FELUCCA_USB_HOST
+    if (uh.on) {
+        if (uh.run) uh_poll();
+        return;
+    }
+#endif
     if (!usb.up)
         return;
     if (fm1_usb_sof_take()) {                           /* SOF pending: NOT a reliable "host is there" */
@@ -1614,10 +1666,13 @@ static void usb_start(void)                             /* boot, or main-loop re
  * later still enumerates. */
 static void usb_retry(uint32_t now_ms)
 {
-    static uint32_t t;
-    if (usb.up || usb.detached || now_ms - t < 1000u)
+#if FELUCCA_USB_HOST
+    if (uh.on)
         return;
-    t = now_ms;
+#endif
+    if (usb.up || usb.detached || now_ms - usb_retry_ms < 1000u)
+        return;
+    usb_retry_ms = now_ms;
     usb.retries++;
     usb_start();
 }
@@ -1626,6 +1681,12 @@ static void usb_detach(void)
 {
     usb.detached = 1;
     usb.up = 0;
+    RING_PUBLISH();
+#if FELUCCA_USB_HOST
+    if (uh.on) uh_session_end();
+    uh.want = uh.on = 0;
+    RING_PUBLISH();
+#endif
     fm1_usb_off();
 }
 

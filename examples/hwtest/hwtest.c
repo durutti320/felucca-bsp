@@ -11,7 +11,7 @@
  *            and one-letter commands: h help, p print now, c last crash, x crash on purpose, w LED walk,
  *            a the keys' readings on / off, as fm1-ctl reads them (the status line then shows rows PA7 and PA8,
  *              then the top row's seven keys: 1023 open, lower the harder a key is pressed),
- *            k start the second core (experimental, 'cpu1=' then counts in the status line), u UBOOT, r reboot
+ *            k start the second core (experimental; each 'p' then hands it 1000 jobs: 'cpu1=' counts them), u UBOOT, r reboot
  *
  * Two boots in a row that never reach the main loop's "healthy" point drop into UBOOT, so a
  * broken build can always be replaced. The installer (tools/fm1_install.py, or a web installer) replaces hwtest over
@@ -28,6 +28,9 @@
 #define FELUCCA_ID "FM-1_1200"
 #endif
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
+#if HWTEST_EXPERIMENTAL
+#define FM1_CPU1 1                /* fm1_irq.h hands the second core's faults to fm1_cpu1.h */
+#endif
 #include "fm1_time.h"
 #include "fm1_sys.h"
 #include "fm1_irq.h"
@@ -55,13 +58,11 @@ extern uint32_t _rt_start[], _rt_end[], _rt_load[];   /* code that runs from RAM
 
 static volatile uint32_t ms;
 #if HWTEST_EXPERIMENTAL
-static volatile uint32_t cpu1_count;               /* counted by CPU1 once started ('k') */
+static volatile uint32_t cpu1_count, cpu1_late;    /* jobs the second core ran ('k', then each 'p'); jobs back late */
 static uint8_t cpu1_started;
-void fm1_cpu1_main(void)                            /* runs on the second core: polled, no interrupts */
+static void cpu1_job(uint32_t n)                    /* runs on the second core, from the flash */
 {
-    fm1_cpu1_ready();
-    for (;;)
-        cpu1_count++;
+    cpu1_count += n;
 }
 #endif
 static uint32_t boots_ok;
@@ -293,8 +294,19 @@ static void status(int32_t knob, int32_t batt)
         putd("an_timeouts=", fm1_an.timeouts);
     }
 #if HWTEST_EXPERIMENTAL
-    if (cpu1_started)
+    if (cpu1_started) {                         /* a thousand jobs, each waited for */
+        uint32_t i;
+        for (i = 0; i < 1000u; i++)
+            if (fm1_cpu1_run(cpu1_job, 1) && fm1_cpu1_wait())
+                cpu1_late++;
         putd("cpu1=", cpu1_count);
+        putd("late=", cpu1_late);
+        putd("cpu1_on=", fm1_cpu1_on);
+        putd("gave_up=", fm1_cpu1_gave_up);
+        putd("rejected=", fm1_cpu1_mb.rejected);
+        putd("faults=", fm1_cpu1_fault.count);
+        putd("stack=", fm1_cpu1_stack_used());
+    }
 #endif
     puts_("\r\n");
 }
@@ -325,10 +337,11 @@ static void command(char c, int32_t knob, int32_t batt)
             puts_("cpu1 already started\r\n");
             break;
         }
-        fm1_guard_unlock_top();
-        cpu1_started = fm1_cpu1_start(100) == 0;
-        fm1_guard_lock_top();
-        puts_(cpu1_started ? "cpu1 up\r\n" : "cpu1 did not report in\r\n");
+        fm1_irq_off();                              /* (a firmware starts it at power-on, before the timers) */
+        cpu1_started = fm1_cpu1_start() == 0;       /* (it opens the PC limits and the top of RAM meanwhile) */
+        fm1_irq_on();
+        puts_(cpu1_started ? "cpu1 up\r\n" : fm1_cpu1_barred() ? "cpu1 barred until power-off\r\n"
+                                                                : "cpu1 did not report in\r\n");
         break;
     case 'x':                                   /* test the guards: write to the NULL page */
         puts_("crashing\r\n");

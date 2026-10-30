@@ -18,7 +18,8 @@ Small FM-1 firmware that exercises this repository on real hardware. It is a tes
 | Corner | Bottom right: red = USB not configured, blinking green = configured. Yellow bottom: the last run crashed. |
 
 Serial commands (both images): `h` help, `p` print now, `c` last crash, `w` LED walk, `u` UBOOT, `r` reboot.
-The SysEx soft key (UBOOT) works too. Only in `hwtest-exp`: `k` start the second core (the status line then shows `cpu1=`),
+The SysEx soft key (UBOOT) works too. Only in `hwtest-exp`: `k` start the second core (each `p` then hands it a thousand jobs: `cpu1=` counts them, `late=`
+the ones not back in time, `gave_up=` why it was retired, `rejected=` its misreads, `stack=` its depth),
 `x` crash on purpose (tests the fault report).
 
 Two boots in a row that do not reach the main loop's healthy point (2 s) drop into UBOOT, so a bad build
