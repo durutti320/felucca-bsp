@@ -26,7 +26,9 @@
  *
  * Key velocity: the stock two-contact algorithm (T = 10 + frames between contact 1 and contact 2, in the
  * stock's 0.1 ms frames, from the 24 MHz time base here) and its 5-point curves (trimdata at flash 0xC1000,
- * defaults {5,640,800,920,980}). Our scan samples a key once per 1.6 ms, so fast strikes quantise coarsely. */
+ * defaults {5,640,800,920,980}). Our scan samples a key once per 1.6 ms, so fast strikes quantise coarsely.
+ * smk_key_touch scales the time T counts (0.1 ms x touch): on a unit where the hardest strokes read about 80 at 1, a
+ * touch of 4 reads them as the stock firmware does, near 127 (the platform sets it: fm1-base plat_key_touch). */
 #pragma once
 #include <stdint.h>
 #include "fm1_time.h"
@@ -119,6 +121,8 @@ static volatile struct {
     uint32_t notes_pressed;      /* note-key press edges since the last fm1_input_note_edges() */
     uint64_t keys;               /* all 37 keybed keys: bit k = key k (0 = lowest C) */
     uint8_t key_vel[FM1_NKEY];   /* MIDI velocity 1..127 of each key's last press (a pad: its white key's) */
+    uint8_t last_key, last_vel;  /* the keybed key pressed last (+1; 0 none), its velocity */
+    uint16_t last_dt;            /* and its stroke: contact 1 to contact 2, 0.1 ms */
     uint8_t raw[FM1_NCOL];       /* last frame, rows packed, 1 = closed */
     uint8_t cnt[FM1_NBTN];       /* button debounce */
     uint8_t ks_last[FM1_NKEY], ks_stab[FM1_NKEY], ks_rel[FM1_NKEY];
@@ -224,6 +228,16 @@ static uint32_t smk_curve(const uint16_t *t, uint32_t x)   /* stock curve: 5 poi
     return v ? v : 1u;
 }
 FM1_INLINE uint8_t smk_vel7(uint32_t v10) { return (uint8_t)(v10 >> 3 ? v10 >> 3 : 1u); }
+
+/* the keys' time base: T counts 0.1 ms x this (1..15; 1 the stock's as analysed, more a lighter touch: the same
+ * stroke a higher velocity). The platform sets it (fm1-base plat_key_touch) */
+static volatile uint8_t smk_key_touch = 1;
+/* key k's velocity (1..127) for a stroke of dt (contact 1 to contact 2, 0.1 ms) through its curve */
+static uint32_t smk_key_vel(uint32_t k, uint32_t dt)
+{
+    uint32_t touch = smk_key_touch ? smk_key_touch : 1u, T = 10u + dt / touch, x = T <= 0x3FEu ? 0x3FFu - T : 1u;
+    return smk_vel7(smk_curve(smk_trim_key[k], x));
+}
 
 static void smk_trim_defaults(void)
 {
@@ -348,9 +362,12 @@ static void smk__keys(uint32_t now)
         if (st == 0u)
             fm1_in.ks_t1[k] = now;                        /* contact 1 made (or both in one frame) */
         if (s == 3u && st != 3u) {                        /* contact 2 made: the note, timed from contact 1 */
-            uint32_t T = 10u + (now - fm1_in.ks_t1[k]) / (100u * FM1_TICKS_PER_US);   /* stock 0.1 ms frames */
-            uint32_t x = T <= 0x3FEu ? 0x3FFu - T : 1u;
-            smk__key_event(k, smk_vel7(smk_curve(smk_trim_key[k], x)));
+            uint32_t dt = (now - fm1_in.ks_t1[k]) / (100u * FM1_TICKS_PER_US), v;   /* stock 0.1 ms frames */
+            v = smk_key_vel(k, dt);
+            fm1_in.last_dt = (uint16_t)(dt > 0xFFFFu ? 0xFFFFu : dt);
+            fm1_in.last_vel = (uint8_t)v;
+            fm1_in.last_key = (uint8_t)(k + 1u);
+            smk__key_event(k, v);
         }
         if (s == 1u && st == 3u)                          /* 3 -> 1: still down */
             continue;
