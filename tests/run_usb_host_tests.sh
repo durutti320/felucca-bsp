@@ -14,7 +14,8 @@ for mode in host host-audio device loader \
         desc-midi desc-in desc-in-cdc desc-in-cdc1 desc-in-48k desc-asfirst desc-out desc-out-asfirst-cdc \
         desc-out-48k-asfirst desc-last desc-last-cdc desc-last-cdc1 desc-last-48k desc-last-out \
         desc-last-out-cdc desc-last-out-48k-cdc2 desc-last-asfirst desc-last-iad desc-last-out-iad-cdc desc-iad \
-        desc-last2-out desc-last2-out-iad-cdc; do
+        desc-last2-out desc-last2-out-iad-cdc desc-ports2 desc-ports2-in-last-cdc desc-ports2-named \
+        loader-ports2; do
     case "$mode" in
         host) flags="" ;;
         host-audio) flags="-DTEST_UAC=1" ;;
@@ -42,6 +43,11 @@ for mode in host host-audio device loader \
         desc-iad) flags="$D -DFELUCCA_UAC_IAD=1" ;;
         desc-last2-out) flags="$D -DTEST_CDC=0 -DFELUCCA_UAC_MIDI_LAST=2" ;;
         desc-last2-out-iad-cdc) flags="$D -DFELUCCA_UAC_MIDI_LAST=2 -DFELUCCA_UAC_IAD=1" ;;
+        desc-ports2) flags="-DTEST_HOST=0 -DFELUCCA_USB_MIDI_PORTS=2" ;;
+        desc-ports2-in-last-cdc) flags="$D -DTEST_OUT=0 -DFELUCCA_UAC_MIDI_LAST=1 -DFELUCCA_USB_MIDI_PORTS=2" ;;
+        desc-ports2-named) flags="$D -DTEST_OUT=0 -DTEST_CDC=0 -DFELUCCA_UAC_MIDI_LAST=1 -DFELUCCA_USB_MIDI_PORTS=2 \
+            -DFELUCCA_USB_MIDI_NAME2=\"SPIDER_DAW\"" ;;
+        loader-ports2) flags="-DFELUCCA_LOADER=1 -DFELUCCA_USB_MIDI_PORTS=2" ;;
     esac
     # Word splitting is intentional for the fixed compiler options above.
     "${CC:-cc}" -std=c11 -O1 -Wall -Wextra -Werror -Wno-unused-function \

@@ -28,7 +28,13 @@
  * stereo, 44.1 kHz, EP4 OUT isochronous adaptive). uac_service takes each packet into a ring (nested in the render
  * too); uac_play, after each render, adds it to the output, resampled to the I2S clock (~44,117.6 Hz): the ring's
  * fill steers the rate, so it neither runs dry nor overflows.
- * FELUCCA_USB_HOST=1 adds opt-in MIDI host mode; see docs/USB_HOST.md for the main-loop contract. */
+ * FELUCCA_USB_HOST=1 adds opt-in MIDI host mode; see docs/USB_HOST.md for the main-loop contract.
+ * FELUCCA_USB_MIDI_PORTS=2 adds a second USB MIDI port (cable 1: embedded jacks 5 in and 7 out, beside 1 and 3), for
+ * a DAW's control surface beside the music. What comes in on it goes to a ring of its own (midi_in2_take, the main
+ * loop's), never the MIDI ring: nothing waits for it (a full ring drops, counted in midi_in2_lost), so a host feeding
+ * it faster than it is read never holds back the notes and the clock on the first port. Packets sent with cable 1 in
+ * byte 0 go out on it. FELUCCA_USB_MIDI_NAME2: the name of its jacks (iJack, string 4), where the host shows one
+ * (macOS, Linux; Windows' classic driver calls it MIDIIN2 / MIDIOUT2 (the product)). The update loader: one port. */
 #include "fm1_usb.h"   /* registers (chip/) */
 /* Host is opt-in and excluded from update loaders, even with a global build flag. */
 #ifndef FELUCCA_USB_HOST
@@ -40,6 +46,16 @@
 #endif
 #ifndef FELUCCA_CDC
 #define FELUCCA_CDC 0
+#endif
+#ifndef FELUCCA_USB_MIDI_PORTS
+#define FELUCCA_USB_MIDI_PORTS 1
+#endif
+#ifdef FELUCCA_LOADER
+#undef FELUCCA_USB_MIDI_PORTS
+#define FELUCCA_USB_MIDI_PORTS 1
+#endif
+#if FELUCCA_USB_MIDI_PORTS < 1 || FELUCCA_USB_MIDI_PORTS > 2
+#error "FELUCCA_USB_MIDI_PORTS is 1 or 2"
 #endif
 #ifndef FELUCCA_UAC
 #define FELUCCA_UAC 0
@@ -306,6 +322,35 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
 {
     return usb_midi_out_ready() ? MQ - (mo_w - mo_r) : 0u;
 }
+#if FELUCCA_USB_MIDI_PORTS > 1
+/* the second port's ring (cable 1 in, the packets with the cable cleared): filled by usb_poll, read by the main loop;
+ * full, a packet is dropped (never waits: the first port's ring has the back-pressure) */
+#ifndef MQ2
+#define MQ2 256u
+#endif
+static uint32_t midi_in2_q[MQ2];
+static volatile uint32_t mi2_w, mi2_r, midi_in2_lost;
+static void midi_in2_put(uint32_t pkt)
+{
+    if (mi2_w - mi2_r >= MQ2) {
+        midi_in2_lost++;
+        return;
+    }
+    midi_in2_q[mi2_w % MQ2] = pkt & ~0xF0u;
+    RING_PUBLISH();
+    mi2_w++;
+}
+static int midi_in2_take(uint32_t *pkt)
+{
+    if (mi2_r == mi2_w)
+        return 0;
+    RING_PUBLISH();
+    *pkt = midi_in2_q[mi2_r % MQ2];
+    RING_PUBLISH();
+    mi2_r++;
+    return 1;
+}
+#endif
 
 /* ------------------------------------------------------- descriptors --- */
 /* Two functions: audio + MIDI (0 audio control, 1 MIDI streaming, 2 audio streaming with FELUCCA_UAC, 3 the
@@ -315,7 +360,7 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
  * bcdDevice: 3.00 MIDI, +0.10 the audio input (+0.20 since 1.1: 44.1 and 48 kHz, FELUCCA_UAC_48K), +0.40 the
  * audio output (FELUCCA_UAC_OUT), +0.08 the audio streaming interfaces first in the AC collection
  * (FELUCCA_UAC_AS_FIRST), +0.80 MIDI the last interface (FELUCCA_UAC_MIDI_LAST=1; =2: +1.00), +2.00 the
- * IAD without the console (FELUCCA_UAC_IAD), +0.01 CDC
+ * IAD without the console (FELUCCA_UAC_IAD), +10.00 the second MIDI port (FELUCCA_USB_MIDI_PORTS=2), +0.01 CDC
  * (+0.02 per FELUCCA_USB_LAYOUT step, so a host never reuses what it learnt about another layout).
  * FELUCCA_USB_LAYOUT, how the CDC build presents itself (#67: macOS 13-15 attach Apple's CDC composite
  * driver to a misc / IAD device that has a CDC function, and their kernel audio driver then never
@@ -432,17 +477,37 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
 #define D_AS(s)
 #define D_ASO(o)
 #endif
+/* MIDI streaming: jacks 1 (embedded in) 2 (external in) 3 (embedded out, from 2) 4 (external out, from 1); with
+ * FELUCCA_USB_MIDI_PORTS=2 the same again as 5..8 (cable 1), each endpoint listing both of its embedded jacks */
+#if FELUCCA_USB_MIDI_PORTS > 1
+#ifdef FELUCCA_USB_MIDI_NAME2
+#define MIDI2_STR 4
+#else
+#define MIDI2_STR 0
+#endif
+#define D_MIDI_PORT2                                                                                 \
+    6, 0x24, 2, 1, 5, MIDI2_STR,                                                                     \
+    6, 0x24, 2, 2, 6, 0,                                                                             \
+    9, 0x24, 3, 1, 7, 1, 6, 1, MIDI2_STR,                                                            \
+    9, 0x24, 3, 2, 8, 1, 5, 1, 0,
+#define D_MIDI_EPJ(a, b) 6, 0x25, 1, 2, (a), (b),
+#else
+#define D_MIDI_PORT2
+#define D_MIDI_EPJ(a, b) 5, 0x25, 1, 1, (a),
+#endif
+#define MIDI_MS_LEN (65 + 32 * (FELUCCA_USB_MIDI_PORTS - 1))   /* the class-specific part, endpoints included */
 #define D_MIDI(m)                                                                                    \
     9, 4, (m), 0, 2, 1, 3, 0, 0,                                                                     \
-    7, 0x24, 1, 0x00, 0x01, 0x41, 0x00,                                                              \
+    7, 0x24, 1, 0x00, 0x01, MIDI_MS_LEN & 0xFF, MIDI_MS_LEN >> 8,                                    \
     6, 0x24, 2, 1, 1, 0,                                                                             \
     6, 0x24, 2, 2, 2, 0,                                                                             \
     9, 0x24, 3, 1, 3, 1, 2, 1, 0,                                                                    \
     9, 0x24, 3, 2, 4, 1, 1, 1, 0,                                                                    \
+    D_MIDI_PORT2                                                                                     \
     9, 5, 0x01, 2, 64, 0, 0, 0, 0,                                                                   \
-    5, 0x25, 1, 1, 1,                                                                                \
+    D_MIDI_EPJ(1, 5)                                                                                 \
     9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
-    5, 0x25, 1, 1, 3,
+    D_MIDI_EPJ(3, 7)
 /* audio + MIDI from interface a, in the order FELUCCA_UAC_MIDI_LAST picks */
 #if FELUCCA_UAC_MIDI_LAST
 #define D_AUDIO(a) D_AC(a) D_AS((a) + IF_AS) D_ASO((a) + IF_ASO) D_MIDI((a) + IF_MIDI)
@@ -451,7 +516,8 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
 #endif
 #define AUD_NIF (2 + FELUCCA_UAC + FELUCCA_UAC_OUT)
 #define AUD_FN_NIF (AUD_NIF - (FELUCCA_UAC_MIDI_LAST == 2))   /* the audio function's (its IAD): AC + its collection */
-#define AUD_LEN (92 + (63 + FMT_LEN) * FELUCCA_UAC + 74 * FELUCCA_UAC_OUT - (FELUCCA_UAC_MIDI_LAST == 2))
+#define AUD_LEN (92 + (63 + FMT_LEN) * FELUCCA_UAC + 74 * FELUCCA_UAC_OUT - (FELUCCA_UAC_MIDI_LAST == 2) + \
+                 32 * (FELUCCA_USB_MIDI_PORTS - 1))
 #define D_CDC(c)                                                                                     \
     D_IAD((c), 2, 2, 2, 1),                                /* IAD: CDC ACM */                           \
     9, 4, (c), 0, 1, 2, 2, 1, 0,                           /* communication */                          \
@@ -466,7 +532,7 @@ static uint32_t midi_out_room(void)                  /* free slots in the out ri
 #define CDC_LEN 66                                         /* with its IAD */
 #define BCD_LO(cdc) (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x40 * FELUCCA_UAC_OUT + 0x08 * FELUCCA_UAC_AS_FIRST + \
                      0x80 * (FELUCCA_UAC_MIDI_LAST == 1) + ((cdc) ? 0x01 + 2 * FELUCCA_USB_LAYOUT : 0))
-#define BCD_HI (0x03 + (FELUCCA_UAC_MIDI_LAST == 2) + 2 * FELUCCA_UAC_IAD)
+#define BCD_HI (0x03 + (FELUCCA_UAC_MIDI_LAST == 2) + 2 * FELUCCA_UAC_IAD + 0x10 * (FELUCCA_USB_MIDI_PORTS - 1))
 #define D_DEV(bcdusb, cls, sub, proto, cdc)                                                          \
     18, 1, (bcdusb) & 0xFF, (bcdusb) >> 8, (cls), (sub), (proto), 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF, \
     FELUCCA_USB_PID >> 8, BCD_LO(cdc), BCD_HI, 1, 2, 0, 1
@@ -534,7 +600,8 @@ static const uint8_t STR2[] = {30, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c
 static const uint8_t STR2[] = {16, 3, 'F', 0, 'e', 0, 'l', 0, 'u', 0, 'c', 0, 'c', 0, 'a', 0};
 #endif
 
-#if defined(FELUCCA_USB_MANUFACTURER) || defined(FELUCCA_USB_PRODUCT)
+#if defined(FELUCCA_USB_MANUFACTURER) || defined(FELUCCA_USB_PRODUCT) || \
+    (FELUCCA_USB_MIDI_PORTS > 1 && defined(FELUCCA_USB_MIDI_NAME2))
 /* A string descriptor built from a plain ASCII string (the build settings FELUCCA_USB_MANUFACTURER and
  * FELUCCA_USB_PRODUCT, e.g. -DFELUCCA_USB_PRODUCT='"CTL-1 FM-1"'), at most 31 characters. EP0 sends one
  * descriptor at a time, so one buffer serves both. */
@@ -588,6 +655,10 @@ static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
             *d = STR2;
             *l = sizeof STR2;
             return 1;
+#endif
+#if FELUCCA_USB_MIDI_PORTS > 1 && defined(FELUCCA_USB_MIDI_NAME2)
+        case 4:
+            return usb_str_desc(FELUCCA_USB_MIDI_NAME2, d, l);
 #endif
         default:
             return 0;
@@ -1059,6 +1130,13 @@ static void sysex_byte(uint8_t b)
 static void midi_in_event(uint32_t pkt)                 /* one USB-MIDI event packet */
 {
     uint32_t cin = pkt & 15u, st = (pkt >> 8) & 0xFFu;
+#if FELUCCA_USB_MIDI_PORTS > 1
+    if ((pkt >> 4 & 15u) == 1u) {                       /* the second port: all of it as it came, to its own ring */
+        if (cin >= 2u)
+            midi_in2_put(pkt);
+        return;
+    }
+#endif
     if (cin >= 4u && cin <= 7u) {
         uint32_t k, nb = cin == 4u || cin == 7u ? 3u : cin == 6u ? 2u : 1u;
         for (k = 0; k < nb; k++)

@@ -396,8 +396,9 @@ static uint32_t check_descriptors(int cdc_on, int verbose)
     uint16_t dl, cl;
     t_if f[8];
     uint8_t nf = 0, coll[4] = {0}, ncoll = 0, iad[3][2], niad = 0, iad_at[3], ac_cs = 0, i;
-    uint16_t ac_total = 0, ac_sum = 0;
-    int in_ac = 0;
+    uint16_t ac_total = 0, ac_sum = 0, ms_total = 0, ms_sum = 0;
+    int in_ac = 0, in_ms = 0;
+    uint8_t jin[4], jout[4], njin = 0, njout = 0, epj[2][4], nepj[2] = {0, 0}, ms_ep = 0, jstr[8] = {0};
 #if FELUCCA_CDC
     usb_cdc_on = (uint8_t)cdc_on;
 #endif
@@ -408,8 +409,11 @@ static uint32_t check_descriptors(int cdc_on, int verbose)
     for (uint32_t p = c[0]; p < cl; p += c[p]) {
         const uint8_t *d = c + p;
         assert(d[0] >= 2 && p + d[0] <= cl);
+        if (in_ms && (d[1] == 5 || d[1] == 0x24 || d[1] == 0x25))
+            ms_sum = (uint16_t)(ms_sum + d[0]);         /* (MIDI streaming: what its header's total counts) */
         if (d[1] == 4) {                                /* interface */
             in_ac = d[5] == 1 && d[6] == 1;
+            in_ms = d[5] == 1 && d[6] == 3;
             if (d[3] == 0) {
                 assert(nf < 8 && d[2] == nf);           /* numbered 0.. in the order they come */
                 f[nf].num = d[2];
@@ -429,6 +433,17 @@ static uint32_t check_descriptors(int cdc_on, int verbose)
             iad[niad][0] = d[2];
             iad[niad][1] = d[3];
             iad_at[niad++] = d[4];
+        } else if (in_ms && d[1] == 0x24) {             /* class-specific MIDI streaming: the header, the jacks */
+            if (d[2] == 1)
+                ms_total = (uint16_t)(d[5] | d[6] << 8), ms_sum = (uint16_t)(ms_sum + d[0]) - d[0];
+            else if (d[2] == 2 && d[3] == 1)
+                assert(njin < 4 && d[0] == 6), jstr[d[4] & 7] = d[5], jin[njin++] = d[4];
+            else if (d[2] == 3 && d[3] == 1)
+                assert(njout < 4 && d[0] == 9), jstr[d[4] & 7] = d[8], jout[njout++] = d[4];
+        } else if (in_ms && d[1] == 0x25) {             /* an endpoint's embedded jacks */
+            assert(ms_ep < 2 && d[0] == 4 + d[3] && d[3] <= 4);
+            nepj[ms_ep] = d[3];
+            memcpy(epj[ms_ep++], d + 4, d[3]);
         } else if (d[1] == 0x24 && in_ac) {             /* class-specific audio control */
             if (d[2] == 1) {
                 ac_total = (uint16_t)(d[5] | d[6] << 8);
@@ -441,6 +456,38 @@ static uint32_t check_descriptors(int cdc_on, int verbose)
         }
     }
     assert(c[4] == nf && ac_cs && ac_total == ac_sum);
+    /* MIDI streaming: the header's total, one embedded jack pair per port, EP1 OUT feeding the in jacks and EP1 IN
+     * from the out jacks in cable order; the second port's jacks named by string 4 (with a name) */
+    {
+        const uint8_t ports = FELUCCA_USB_MIDI_PORTS;
+        assert(ms_total && ms_total == ms_sum && ms_total == 65 + 32 * (ports - 1));
+        assert(njin == ports && njout == ports && ms_ep == 2 && nepj[0] == ports && nepj[1] == ports);
+        for (i = 0; i < ports; i++) {
+            assert(jin[i] == 1 + 4 * i && jout[i] == 3 + 4 * i);
+            assert(epj[0][i] == jin[i] && epj[1][i] == jout[i]);
+#if FELUCCA_USB_MIDI_PORTS > 1 && defined(FELUCCA_USB_MIDI_NAME2)
+            assert(jstr[jin[i] & 7] == (i ? 4 : 0) && jstr[jout[i] & 7] == (i ? 4 : 0));
+#else
+            assert(jstr[jin[i] & 7] == 0 && jstr[jout[i] & 7] == 0);
+#endif
+        }
+#if FELUCCA_USB_MIDI_PORTS > 1 && defined(FELUCCA_USB_MIDI_NAME2)
+        {
+            const uint8_t *sd;
+            uint16_t sl;
+            const char *nm = FELUCCA_USB_MIDI_NAME2;
+            assert(get_desc(0x0304, &sd, &sl) && sd[0] == sl && sd[1] == 3 && sl == 2 + 2 * strlen(nm));
+            for (i = 0; nm[i]; i++)
+                assert(sd[2 + 2 * i] == (uint8_t)nm[i] && sd[3 + 2 * i] == 0);
+        }
+#else
+        {
+            const uint8_t *sd;
+            uint16_t sl;
+            assert(!get_desc(0x0304, &sd, &sl));
+        }
+#endif
+    }
 
     /* what it should be, written out independently of the descriptor macros */
     const int has_uac = FELUCCA_UAC, out = FELUCCA_UAC_OUT, ml = FELUCCA_UAC_MIDI_LAST, nas = has_uac + out;
@@ -539,7 +586,8 @@ static uint32_t check_descriptors(int cdc_on, int verbose)
     {
         uint32_t lo = 0x10u * (uint32_t)(has_uac + FELUCCA_UAC_48K) + 0x40u * (uint32_t)out + 0x08u * (uint32_t)as_first
                       + 0x80u * (uint32_t)(ml == 1) + (cdc_on ? 0x01u + 2u * FELUCCA_USB_LAYOUT : 0u);
-        uint32_t hi = 3u + (uint32_t)(ml == 2) + 2u * (uint32_t)(FELUCCA_UAC_IAD && has_uac);
+        uint32_t hi = 3u + (uint32_t)(ml == 2) + 2u * (uint32_t)(FELUCCA_UAC_IAD && has_uac) +
+                      0x10u * (uint32_t)(FELUCCA_USB_MIDI_PORTS - 1);
         assert(dv[12] == lo && dv[13] == hi);
     }
     /* SET_INTERFACE: the stream starts and stops on its own interface only */
@@ -1096,9 +1144,39 @@ int main(void)
 }
 
 #else
+#if FELUCCA_USB_MIDI_PORTS > 1
+/* the second port: what comes in on cable 1 goes to its own ring (the cable cleared), SysEx and all, never the MIDI
+ * ring; cable 0 as before; a full ring drops and counts, holding nothing back */
+static void test_port2(void)
+{
+    uint32_t pk, i, n;
+    static const uint8_t two[16] = {0x19, 0x90, 0x5E, 0x7F, 0x09, 0x90, 0x3C, 0x64,     /* cable 1 note, cable 0 note */
+                                    0x14, 0xF0, 0x00, 0x00, 0x17, 0x66, 0x14, 0xF7};   /* cable 1 SysEx, 2 packets */
+    mi_r = mi_w;
+    mi2_r = mi2_w;
+    assert(ep1_take(two, 16));
+    assert(mi_w - mi_r == 1 && midi_in_q[mi_r % MQ] == 0x643C9009u);
+    mi_r = mi_w;
+    assert(midi_in2_take(&pk) && pk == 0x7F5E9009u);
+    assert(midi_in2_take(&pk) && pk == 0x0000F004u);
+    assert(midi_in2_take(&pk) && pk == 0xF7146607u);
+    assert(!midi_in2_take(&pk));
+    assert(!usb.sx_on);                                  /* (the first port's SysEx state untouched) */
+    for (i = 0; i < MQ2 + 10u; i++)
+        midi_in_event(0x7F00B01Bu | (i & 127u) << 16);
+    assert(midi_in2_lost == 10u && mi_w == mi_r);
+    for (n = 0; midi_in2_take(&pk); n++)
+        assert(pk == (0x7F00B00Bu | (n & 127u) << 16));
+    assert(n == MQ2);
+    puts("USB device: the second MIDI port's input on its own ring: OK");
+}
+#endif
 int main(void)
 {
     test_descriptors();
+#if FELUCCA_USB_MIDI_PORTS > 1
+    test_port2();
+#endif
     usb_start();
     assert(usb.up && !usb.config);
     usb.config = 1;
