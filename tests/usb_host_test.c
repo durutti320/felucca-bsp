@@ -1177,6 +1177,11 @@ int main(void)
 #if FELUCCA_USB_MIDI_PORTS > 1
     test_port2();
 #endif
+    mi_r = mi_w;                                         /* Song Position Pointer: in (a bad data byte: not) */
+    midi_in_event(0x0005F203u);
+    midi_in_event(0x0085F203u);
+    assert(mi_w - mi_r == 1u && midi_in_q[mi_r % MQ] == 0x0005F203u);
+    mi_r = mi_w;
     usb_start();
     assert(usb.up && !usb.config);
     usb.config = 1;
