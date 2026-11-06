@@ -16,7 +16,9 @@
  *                    (the stock firmware's mapping until the app first writes there)
  *   0xEA000-0xEAFFF  the stock firmware's end marker "usrdata" at 0xEAFF8: erased once, before the first write into
  *                    FL_XDATA0 (FL_STOCKTAG), so a return to stock rebuilds its factory mapping
- *   0xEB000-0xF3FFF  free, not listed (unused)
+ *   0xEB000-0xF3FFF  the app's big data, its second window (FL_XDATA1, PLAT_XDATA1): in no region of the stock  the app
+ *                    package (its USRFLASH ends at 0xEB000, its USR starts at 0xF4000), so unused by the stock
+ *                    firmware; what the app leaves there stays through a return to stock and back
  *   0xF4000-0xFDFFF  USR (stock resources; kept for a return to stock)       NEVER
  *   0xFE000-0xFEFFF  free, unused
  *   0xFF000-0xFFFFF  key_mac (the chip's key and MAC)                        NEVER
@@ -51,8 +53,8 @@
 #define FL_OTA_HI       0x000C0000u
 #define FL_XDATA0_LO    0x000C2000u                /* the app's big data (samples): USRFLASH */
 #define FL_XDATA0_HI    0x000EA000u
-#define FL_XDATA1_LO    0x000EA000u                /* (no second window on the SMK: empty) */
-#define FL_XDATA1_HI    0x000EA000u
+#define FL_XDATA1_LO    0x000EB000u                /* the app's big data, its second window: the gap in the stock */
+#define FL_XDATA1_HI    0x000F4000u                /* layout between USRFLASH (and its end marker) and USR */
 #define FL_STOCKTAG_LO  0x000EA000u                /* the stock end marker's sector: erased whole, once */
 #define FL_STOCKTAG_HI  0x000EB000u
 #define FL_STOCKTAG_OFF 0x000EAFF8u
@@ -66,7 +68,8 @@
 _Static_assert(FL_WIN_SAFE(FL_DATA_LO, FL_DATA_HI), "SMK: FL_DATA overlaps a protected range");
 _Static_assert(FL_WIN_SAFE(FL_OTA_LO, FL_OTA_HI), "SMK: FL_OTA overlaps a protected range");
 _Static_assert(FL_WIN_SAFE(FL_XDATA0_LO, FL_XDATA0_HI), "SMK: FL_XDATA0 overlaps a protected range");
-_Static_assert(FL_XDATA1_LO == FL_XDATA1_HI, "SMK: no second data window");
+_Static_assert(FL_WIN_SAFE(FL_XDATA1_LO, FL_XDATA1_HI) && FL_XDATA1_LO >= FL_STOCKTAG_HI && FL_XDATA1_HI <= FL_USRRES_LO,
+               "SMK: FL_XDATA1 is the stock layout's gap, after the end marker's sector, before USR");
 _Static_assert(FL_WIN_SAFE(FL_STOCKTAG_LO, FL_STOCKTAG_HI) && FL_STOCKTAG_LO == FL_XDATA0_HI &&
                FL_STOCKTAG_OFF + 8u == FL_STOCKTAG_HI, "SMK: the stock marker sector");
 _Static_assert(FL_WIN_SAFE(FL_APP_LO, FL_APP_HI) && FL_WIN_SAFE(FL_REC_LO, FL_REC_HI), "SMK: the loader's windows");
@@ -77,7 +80,7 @@ _Static_assert(FL_APP_HI <= FL_DATA_LO && FL_DATA_HI <= FL_OTA_LO, "SMK: windows
 /* the store (the VM; an app's store objects may also lie in USRFLASH, its big-data window: both are the app's), and
  * the app's big data */
 #define FL_STORE_OK(off, n) (FL_IN(off, n, FL_DATA_LO, FL_DATA_HI) || FL_IN(off, n, FL_XDATA0_LO, FL_XDATA0_HI))
-#define FL_XDATA_OK(off, n) FL_IN(off, n, FL_XDATA0_LO, FL_XDATA0_HI)
+#define FL_XDATA_OK(off, n) (FL_IN(off, n, FL_XDATA0_LO, FL_XDATA0_HI) || FL_IN(off, n, FL_XDATA1_LO, FL_XDATA1_HI))
 /* where the RAM driver may erase / program: the app's windows, the staging, the stock marker's sector (whole); the
  * update loader defines its own (loader.c) */
 #ifndef FL_RANGE_OK
