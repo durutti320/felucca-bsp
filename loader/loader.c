@@ -39,8 +39,10 @@
 #include "../chip/usb.c"
 /* usb.c's SysEx queue (FELUCCA_SX_IN, the loader's default there) holds the fast install's reply whole: a 4 KiB read
  * and its 15 bytes of frame, 7-bit packed, and the queue's length field */
+#ifdef LDR_FAST_CHUNK
 _Static_assert(((LDR_FAST_CHUNK + 15u) * 8u + 6u) / 7u + 2u <= FELUCCA_SX_IN, "FELUCCA_SX_IN: a 4 KiB reply whole");
 _Static_assert(LDR_FAST_CHUNK + 15u <= OTA_FRAME_MAX, "OTA_FRAME_MAX: a 4 KiB reply decoded");
+#endif
 #include "ldr_screen.c"
 
 static uint32_t ldr_ms(void)   /* monotonic ms; survives the TIMER4 wrap (178.9 s) */
@@ -146,8 +148,12 @@ void ldr_main(void)
             fm1_delay_ms(30);
             fm1_enter_uboot();
         }
+#ifdef LDR_FAST_CHUNK
         if (ota_service() == 10u && ota_dec[2] == LDR_FAST_CMD)   /* handshake; the fast install's word */
             ldr_fast_hello();
+#else
+        ota_service();                              /* handshake */
+#endif
         if (usb.ota_req) {
             usb.ota_req = 0;
             ldr_screen_progress(0, 1);              /* an install: from here a silent host is a lost cable */
