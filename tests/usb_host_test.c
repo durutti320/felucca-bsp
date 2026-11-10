@@ -11,10 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 #include "../chip/fm1_usb.h"
-#pragma GCC diagnostic pop
 
 /* ------------------------------------------------------- the devices --- */
 enum { KBD, HUB, STICK, NDEV };
@@ -31,6 +28,9 @@ static dev_t_ dev[NDEV];
 static uint8_t kbd_cfg[128], stick_cfg[64], hub_cfg[32];
 static uint16_t kbd_cfg_len;
 static int root;                        /* the device on the root port, -1 none */
+static uint8_t str_on;                  /* the devices answer string requests (the keyboard has a product string) */
+static const char *str_product = "Test Keys 25";
+static uint32_t str_reads;              /* the keyboard's product string read */
 static dev_t_ *dflt;                    /* the device answering at address 0 */
 
 static uint16_t build_kbd_cfg(uint8_t *d, int with_out)
@@ -79,7 +79,7 @@ static void devices_init(void)
 }
 
 /* --------------------------------------------------- the SIE and bus --- */
-static uint8_t regs[4][32], common[16], index_reg, rsp[512];
+static uint8_t regs[5][32], common[16], index_reg, rsp[512];     /* EP0..EP4 (EP4: the audio stream) */
 static uint32_t rsp_len, rsp_pos, ep_cnt[5];
 static void *ep_radr[5];
 static void *ep_tadr[5];
@@ -143,6 +143,24 @@ static int answer(dev_t_ *d, const uint8_t *s)
     } else if (rt == 0x80 && rq == 6 && (val >> 8) == 2) {
         memcpy(rsp, d->cfgd, d->cfglen);
         n = d->cfglen;
+    } else if (rt == 0x80 && rq == 6 && (val >> 8) == 3 && str_on) {   /* strings: languages, then iProduct (2) */
+        uint32_t i;
+        if ((val & 0xFFu) == 0) {
+            static const uint8_t langs[4] = {4, 3, 0x09, 0x04};
+            memcpy(rsp, langs, 4);
+            n = 4;
+        } else if ((val & 0xFFu) == 2 && idx == 0x0409 && d == &dev[KBD]) {
+            for (i = 0; str_product[i]; i++) {
+                rsp[2 + 2 * i] = (uint8_t)str_product[i];
+                rsp[3 + 2 * i] = str_product[i] == '\x01' ? 0x20 : 0;   /* (\x01: a non-ASCII character, U+2001) */
+            }
+            rsp[0] = (uint8_t)(2 + 2 * i);
+            rsp[1] = 3;
+            n = rsp[0];
+            str_reads++;
+        } else {
+            return 0;
+        }
     } else if (rt == 0xA0 && rq == 6 && val == 0x2900 && d->ports) {
         uint8_t hd[9] = {9, 0x29, d->ports, 0, 0, 10, 0, 0, 0xFF};
         memcpy(rsp, hd, 9);
@@ -202,6 +220,7 @@ static void deliver_rx(void)            /* an IN request is pending on EP1 and t
     d = by_addr(common[0]);
     if (!d || d != &dev[KBD] || rx_head == rx_tail)
         return;
+    assert(ep_radr[1]);                                 /* the host code gave EP1 its buffer */
     memcpy(ep_radr[1], rx_q[rx_tail % 8], rx_n[rx_tail % 8]);
     regs[1][22] = rx_n[rx_tail % 8];
     regs[1][23] = 0;
@@ -218,7 +237,7 @@ static void mock_write(uint32_t r, uint32_t v)
         common[r] = (uint8_t)v;
     } else if (r < 16) {
         common[r] = (uint8_t)v;
-    } else if (index_reg == 0 && r == 17) {             /* EP0 CSR, host */
+    } else if (index_reg == 0 && r == 17 && ep_radr[0]) { /* EP0 CSR, host (the host code gave EP0 its buffer) */
         dev_t_ *d = by_addr(common[0]);
         if (v == 0x0A) {
             setup_requests++;
@@ -342,6 +361,9 @@ static void fm1_delay_ms(uint32_t ms) { (void)ms; }
 #define HALF_FRAMES 128u
 static volatile uint32_t render_peak;
 static volatile uint8_t render_busy;
+static uint8_t sx_seen[8];                              /* FELUCCA_SYSEX_BYTE: the bytes the hook saw */
+static uint32_t sx_seen_n;
+#define FELUCCA_SYSEX_BYTE(b) (sx_seen_n < sizeof sx_seen ? (void)(sx_seen[sx_seen_n++] = (b)) : (void)0)
 #include "../chip/usb.c"
 
 /* ------------------------------------------- the device's descriptors --- */
@@ -584,7 +606,7 @@ static uint32_t check_descriptors(int cdc_on, int verbose)
     }
     /* bcdDevice: each option set its own, so a host never reuses what it cached for another */
     {
-        uint32_t lo = 0x10u * (uint32_t)(has_uac + FELUCCA_UAC_48K) + 0x40u * (uint32_t)out + 0x08u * (uint32_t)as_first
+        uint32_t lo = 0x10u * (uint32_t)(has_uac + FELUCCA_UAC_48K) + 0x20u * (uint32_t)(FELUCCA_UAC_CH > 2) + 0x40u * (uint32_t)out + 0x08u * (uint32_t)as_first
                       + 0x80u * (uint32_t)(ml == 1) + (cdc_on ? 0x01u + 2u * FELUCCA_USB_LAYOUT : 0u);
         uint32_t hi = 3u + (uint32_t)(ml == 2) + 2u * (uint32_t)(FELUCCA_UAC_IAD && has_uac) +
                       0x10u * (uint32_t)(FELUCCA_USB_MIDI_PORTS - 1);
@@ -975,6 +997,38 @@ static void test_hub_synth_unplug(void)
     puts("USB host: unplugged OUT-only synth leaves hub idle without retry resets; replug works: OK");
 }
 
+#if FELUCCA_USB_HOST_NAME
+/* the product string (usb_host_name): read once at enumeration, direct and behind the hub; cut, folded to ASCII;
+ * a device without strings, or with no iProduct, connects all the same with no name; gone with the session */
+static void test_name(void)
+{
+    static char longname[48];
+    uint32_t reads;
+    connect(KBD);
+    str_on = 1;
+    str_product = "Test Keys 25  ";
+    host_on(); assert(enumerate() && !strcmp(usb_host_name(), "Test Keys 25") && str_reads == 1);
+    usb_host_switch(0); usb_host_task(fm1_ms); uh.msg = 0;
+    assert(!strcmp(usb_host_name(), ""));
+    connect(HUB);
+    str_on = 1;
+    memset(longname, 'K', 40);
+    longname[3] = '\x01';
+    longname[40] = 0;
+    str_product = longname;
+    reads = str_reads;
+    host_on(); assert(enumerate() && strlen(usb_host_name()) == UH_NAME_MAX && usb_host_name()[3] == '?' &&
+                      usb_host_name()[4] == 'K' && str_reads == reads + 1u);
+    usb_host_switch(0); usb_host_task(fm1_ms); uh.msg = 0;
+    connect(KBD);
+    str_on = 0;                                         /* the strings stall */
+    host_on(); assert(enumerate() && !strcmp(usb_host_name(), "") && uh.msg == UH_MSG_MIDI);
+    usb_host_switch(0); usb_host_task(fm1_ms); uh.msg = 0;
+    str_product = "Test Keys 25";
+    puts("USB host: the device's product string (direct, behind a hub, cut, ASCII; none: connected): OK");
+}
+#endif
+
 static void ack_tx(void)
 {
     const uint8_t *p = ep_tadr[1];
@@ -1137,6 +1191,9 @@ int main(void)
     test_host_output(0);
     test_host_output(1);
     test_endpoint_selection();
+#if FELUCCA_USB_HOST_NAME
+    test_name();                                        /* (before the lifecycle test, which detaches) */
+#endif
     test_mode_lifecycle();
     test_descriptors();
     puts("USB host: all OK");
@@ -1171,6 +1228,131 @@ static void test_port2(void)
     puts("USB device: the second MIDI port's input on its own ring: OK");
 }
 #endif
+#if FELUCCA_UAC
+/* The packets' pacing: renders of HALF_FRAMES on the FM-1's I2S clock (6 MHz / 136, its crystal ppm off), a packet a
+ * ms on the host's. The stream must hold (no underrun, no overrun), carry the I2S clock's frames, and never steer two
+ * packets in a row: a host that follows an asynchronous device's rate closely (iOS's Camera) filled the 5..6 short
+ * packets of the old steering with silence. Time in 1/60 GHz: a ms is 60,000,000, a render 174,080,000 */
+static void test_uac_pace(int r48, int32_t ppm)
+{
+    const uint64_t MS = 60000000u, REND = 174080000u + (uint64_t)((int64_t)174080 * ppm / 1000);
+    uint64_t t_r = REND / 3u, t_p = 0;
+    uint32_t pkts = 0, adj_prev = 0, adjs = 0, runs = 0, lo_n = 99, hi_n = 0, base = r48 ? 48u : 44u;
+    uint32_t under0 = 0, over0 = 0;
+    uint64_t sent = 0, made = 0;
+    static int32_t out[2u * HALF_FRAMES];
+    static uint32_t pk[(UAC_MAXP + 3u) / 4u];
+    memset(&uac, 0, sizeof uac);
+    usb.config = 1;
+    uac.alt = 1;
+    uac.flowing = 1;
+#if FELUCCA_UAC_48K
+    uac.r48 = (uint8_t)r48;
+#else
+    assert(!r48);
+#endif
+    ua_w = ua_r = 0;
+    while (pkts < 61000u) {
+        if (t_r <= t_p) {                               /* the audio interrupt: a render */
+            uint32_t k;
+            uac_render_start();
+            for (k = 0; k < 2u * HALF_FRAMES; k++)
+                out[k] = 1000 << 8;
+            uac_tap(out, HALF_FRAMES);
+            if (pkts >= 1000u)
+                made += HALF_FRAMES;
+            t_r += REND;
+        } else {                                        /* the host's IN token, once a ms */
+            uint32_t a0 = uac.adj_up + uac.adj_down, n = uac_packet(pk), adj;
+            adj = uac.adj_up + uac.adj_down - a0;
+            if (++pkts == 1000u)                        /* a second to settle, then counted */
+                under0 = uac.underruns, over0 = uac.overruns;
+            if (pkts > 1000u) {
+                sent += n;
+                adjs += adj;
+                runs += adj && adj_prev;
+                lo_n = n < lo_n ? n : lo_n;
+                hi_n = n > hi_n ? n : hi_n;
+            }
+            adj_prev = adj;
+            t_p += MS;
+        }
+    }
+    assert(uac.underruns == under0 && uac.overruns == over0);
+    assert(runs == 0);                                  /* never two steered packets in a row */
+    assert(lo_n >= base - 1u && hi_n <= base + 2u && hi_n <= UA_MAXF);
+    if (!ppm)                                           /* the pattern alone carries the I2S clock: hardly steered */
+        assert(adjs <= 60u);
+    {   /* the frames sent follow the frames made (at 48 kHz, x 160 / 147), within the ring */
+        int64_t want = r48 ? (int64_t)(made * 160u / 147u) : (int64_t)made, d = (int64_t)sent - want;
+        assert(d < (int64_t)UA_N && d > -(int64_t)UA_N);
+    }
+    uac.alt = 0;
+    usb.config = 0;
+    printf("USB audio pacing, %s, crystal %+d ppm: 60 s, %u..%u frames a packet, %u steered, none in a row: OK\n",
+           r48 ? "48 kHz" : "44.1 kHz", (int)ppm, (unsigned)lo_n, (unsigned)hi_n, (unsigned)adjs);
+}
+#endif
+#if UA_MC
+/* FELUCCA_UAC_CH: the stream's format and endpoint say the channels; a render's master and the app's channels come out
+ * of the packets in order, frame for frame, across the ring's end and the indices' wrap (UA_WRAP) */
+static void test_uac_channels(void)
+{
+    const uint8_t *d = CFG_DESC_PLAIN;
+    uint32_t i, at = 0, fmt = 0, ep = 0, term = 0, pass, sent = 1, got = 1;   /* (frame 0 would be silence) */
+    while (at < sizeof CFG_DESC_PLAIN) {
+        const uint8_t *x = d + at;
+        if (x[1] == 0x24 && x[2] == 2 && x[0] == 12 && x[3] == 1)
+            term = x[7];
+        if (x[1] == 0x24 && x[2] == 2 && x[0] == 11 && !fmt)
+            fmt = x[4], assert(x[5] == 2 && x[6] == 16 && x[7] == 1 && (x[8] | x[9] << 8 | x[10] << 16) == 44100u);
+        if (x[1] == 5 && x[2] == 0x84)
+            ep = (uint32_t)(x[4] | x[5] << 8);
+        at += x[0];
+    }
+    assert(term == FELUCCA_UAC_CH && fmt == FELUCCA_UAC_CH && ep == 46u * 2u * FELUCCA_UAC_CH && ep <= 1023u);
+    assert(UA_N % HALF_FRAMES == 0 && UA_WRAP % UA_N == 0);
+    usb.config = 1;
+    uac.alt = 1;
+    uac.flowing = 1;
+    uac.go = 0;
+    ua_w = ua_r = UA_WRAP - 3u * UA_N - 17u;            /* near the indices' wrap: they pass it below */
+    for (pass = 0; pass < 40u; pass++) {
+        static int32_t out[2u * HALF_FRAMES];
+        static int16_t pk[(UAC_MAXP + 3u) / 2u];
+        uint32_t k, run, c;
+        uac_render_start();
+        assert(uac.feed);
+        for (k = 0; k < HALF_FRAMES; k++, sent++) {     /* frame f: master f, -f; channel c: f * c */
+            int16_t *p = uac_ch_frame(k, &run);
+            if (!run || !p)
+                assert(0);
+            for (c = 2; c < FELUCCA_UAC_CH; c++)
+                p[c - 2u] = (int16_t)(p[c - 2u] + (int16_t)((sent & 0xFFFu) * c));
+            out[2u * k] = (int32_t)(sent & 0x7FFFu) << 8;
+            out[2u * k + 1u] = -((int32_t)(sent & 0x7FFFu) << 8);
+        }
+        uac_tap(out, HALF_FRAMES);
+        while (ua_fill(ua_w, ua_r) >= 50u) {            /* the packets while the ring holds one */
+            uint32_t n = uac_packet((uint32_t *)pk);
+            for (i = 0; i < n; i++) {
+                const int16_t *f = pk + i * FELUCCA_UAC_CH;
+                if (f[0] == 0 && f[1] == 0 && f[2] == 0 && got == 1)
+                    continue;                           /* the priming's silence */
+                assert(f[0] == (int16_t)(got & 0x7FFFu) && f[1] == (int16_t)-(int32_t)(got & 0x7FFFu));
+                for (c = 2; c < FELUCCA_UAC_CH; c++)
+                    assert(f[c] == (int16_t)((got & 0xFFFu) * c));
+                got++;
+            }
+        }
+    }
+    assert(got > 20u * HALF_FRAMES && ua_w < 8192u && !uac.underruns && !uac.overruns);
+    uac.alt = 0;
+    usb.config = 0;
+    printf("USB audio, %u channels: the format, a %u-byte endpoint, %u frames through a %u-frame ring and the wrap: OK\n",
+           (unsigned)FELUCCA_UAC_CH, (unsigned)ep, (unsigned)got, (unsigned)UA_N);
+}
+#endif
 int main(void)
 {
     test_descriptors();
@@ -1182,15 +1364,53 @@ int main(void)
     midi_in_event(0x0085F203u);
     assert(mi_w - mi_r == 1u && midi_in_q[mi_r % MQ] == 0x0005F203u);
     mi_r = mi_w;
+#if UA_MC
+    test_uac_channels();
+#endif
+#if FELUCCA_UAC
+    {
+        static const int32_t PPM[3] = {0, 200, -200};
+        int i;
+        for (i = 0; i < 3; i++) {
+            test_uac_pace(0, PPM[i]);
+#if FELUCCA_UAC_48K
+            test_uac_pace(1, PPM[i]);
+#endif
+        }
+    }
+#endif
     usb_start();
     assert(usb.up && !usb.config);
     usb.config = 1;
     assert(midi_out_try(0x643c9009u));
     assert(midi_out_room() == MQ - 1u);
+    {   /* a SysEx whose bytes come one a packet (CIN 0xF), as macOS sends some inside a long frame: taken as SysEx
+         * (here the update key, F0 22 24 35 7D F7); a note's status alone in CIN 0xF outside a SysEx is not */
+        static const uint8_t KEY[6] = {0xF0, 0x22, 0x24, 0x35, 0x7D, 0xF7};
+        uint32_t k, w = mi_w;
+        midi_in_event(0x0Fu | 0x90u << 8);
+        assert(!usb.sx_on && mi_w == w);
+        midi_in_event(0x04u | 0xF0u << 8 | 0x22u << 16 | 0x24u << 24);   /* (F0 22 24 in one packet, the rest alone) */
+        for (k = 3; k < 6u; k++)
+            midi_in_event(0x0Fu | (uint32_t)KEY[k] << 8);
+        assert(usb.uboot_req && !usb.sx_on);
+        usb.uboot_req = 0;
+        for (k = 0; k < 6u; k++)                          /* (every byte alone) */
+            midi_in_event(0x0Fu | (uint32_t)KEY[k] << 8);
+        assert(usb.uboot_req);
+        usb.uboot_req = 0;
+    }
+    {   /* FELUCCA_SYSEX_BYTE sees every byte of a SysEx, F0 and F7 too, in the order they came */
+        static const uint8_t SX[5] = {0xF0, 0x7D, 0x01, 0x02, 0xF7};
+        sx_seen_n = 0;
+        midi_in_event(0x04u | 0xF0u << 8 | 0x7Du << 16 | 0x01u << 24);
+        midi_in_event(0x06u | 0x02u << 8 | 0xF7u << 16);
+        assert(sx_seen_n == 5u && memcmp(sx_seen, SX, 5u) == 0);
+    }
     usb_detach();
     usb_retry(5000u);
     assert(!usb.up);
-    puts("USB device-only/loader: startup, MIDI output and detach: OK");
+    puts("USB device-only/loader: startup, MIDI output, the SysEx byte hook and detach: OK");
     return 0;
 }
 #endif

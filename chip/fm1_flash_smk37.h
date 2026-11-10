@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 Leo Kuroshita (@kurogedelic), Hügelton Instruments
  * SMK-37 Pro port: Copyright (C) 2026 M. Geisler (genkigenki/makkuro); felucca-bsp's windows: Cam Durnsford (SPIDER) */
-/* The SMK-37's flash map (BOARD_SMK37; fm1_flash.h includes it in place of the FM-1's): which ranges the RAM flash
+/* The SMK-37's flash map (BOARD_SMK37; fm1_flash_policy.h includes it, before its own defaults): which ranges the RAM flash
  * driver may erase or program, in felucca-bsp's names (FL_DATA, FL_XDATA, FL_OTA). From genkigenki's SMK-37 layer for
  * Felucca (genkigenki/Felucca branch smk37, firmware/hal/fm1_flash_map.h; hardware notes:
  * github.com/genkigenki/fm1-to-smk37). GPL-3.0-only like that layer: this file is not under felucca-bsp's MPL-2.0.
@@ -28,10 +28,7 @@
 #pragma once
 #include <stdint.h>
 
-/* [off, off + n) inside [lo, hi), without wrapping: off + n can overflow, and the 1 MiB part ignores the high address
- * bits, so a wrapped range lands low */
-#define FL_IN(off, n, lo, hi) ((uint32_t)(off) >= (lo) && (uint32_t)(off) <= (hi) && \
-                               (uint32_t)(n) <= (hi) - (uint32_t)(off))
+/* (FL_IN: fm1_flash_policy.h, which includes this file) */
 /* the flash part: 0xEB6014 (1 MiB, read from a unit over the mask-ROM UBOOT), or the FM-1's 0x856014. The driver uses
  * only generic SPI NOR commands (9F, 05/35, 06, 20, 02, 0B) */
 #define FL_JEDEC_OK(id) ((id) == 0xEB6014u || (id) == 0x856014u)
@@ -47,6 +44,7 @@
 #define FL_REC_LO       0x0009D000u                /* the update loader: where it may drop records (the VM only) */
 #define FL_REC_HI       0x000C0000u
 #define FL_PLAIN_LO     0x0009D000u                /* the plain XIP window, from the VM up (fl_plain_window_init) */
+#define FM1_FLASH_PLAIN_LO FL_PLAIN_LO
 #define FL_DATA_LO      0x0009D000u                /* the store */
 #define FL_DATA_HI      0x000BB000u
 #define FL_OTA_LO       0x000BB000u                /* the update loader's staging, ota.c */

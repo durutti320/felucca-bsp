@@ -10,15 +10,16 @@ SANITIZE=${USB_TEST_SANITIZE--fsanitize=address,undefined}
 D="-DTEST_HOST=0 -DTEST_UAC=1"
 # desc-*: the device descriptors in an option set. TEST_GOLDEN_* are the CRC-32s the bsp built before
 # FELUCCA_UAC_MIDI_LAST (with it and FELUCCA_UAC_IAD 0, a build's descriptors stay byte for byte).
-for mode in host host-audio device loader \
+for mode in host host-audio host-name device loader \
         desc-midi desc-in desc-in-cdc desc-in-cdc1 desc-in-48k desc-asfirst desc-out desc-out-asfirst-cdc \
         desc-out-48k-asfirst desc-last desc-last-cdc desc-last-cdc1 desc-last-48k desc-last-out \
         desc-last-out-cdc desc-last-out-48k-cdc2 desc-last-asfirst desc-last-iad desc-last-out-iad-cdc desc-iad \
         desc-last2-out desc-last2-out-iad-cdc desc-ports2 desc-ports2-in-last-cdc desc-ports2-named \
-        loader-ports2; do
+        loader-ports2 desc-ch10 desc-ch10-last-cdc desc-ch4-deep; do
     case "$mode" in
         host) flags="" ;;
         host-audio) flags="-DTEST_UAC=1" ;;
+        host-name) flags="-DFELUCCA_USB_HOST_NAME=1" ;;
         device) flags="-DTEST_HOST=0" ;;
         loader) flags="-DFELUCCA_LOADER=1" ;;
         desc-midi) flags="-DTEST_HOST=0 -DTEST_GOLDEN_PLAIN=0xD8A90D6A -DTEST_GOLDEN_CDC=0xB0107332" ;;
@@ -48,6 +49,9 @@ for mode in host host-audio device loader \
         desc-ports2-named) flags="$D -DTEST_OUT=0 -DTEST_CDC=0 -DFELUCCA_UAC_MIDI_LAST=1 -DFELUCCA_USB_MIDI_PORTS=2 \
             -DFELUCCA_USB_MIDI_NAME2=\"SPIDER_DAW\"" ;;
         loader-ports2) flags="-DFELUCCA_LOADER=1 -DFELUCCA_USB_MIDI_PORTS=2" ;;
+        desc-ch10) flags="$D -DTEST_OUT=0 -DTEST_CDC=0 -DFELUCCA_UAC_CH=10" ;;
+        desc-ch10-last-cdc) flags="$D -DFELUCCA_UAC_CH=10 -DFELUCCA_UAC_MIDI_LAST=1 -DFELUCCA_UAC_AS_FIRST=1" ;;
+        desc-ch4-deep) flags="$D -DTEST_OUT=0 -DFELUCCA_UAC_CH=4 -DFELUCCA_UAC_DEEP=1" ;;
     esac
     # Word splitting is intentional for the fixed compiler options above.
     "${CC:-cc}" -std=c11 -O1 -Wall -Wextra -Werror -Wno-unused-function \

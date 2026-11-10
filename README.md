@@ -9,8 +9,8 @@ Named after its first user, Felucca; it is not tied to that application.
 Unofficial. Not affiliated with or endorsed by M-VAVE or JieLi. Product and company names
 belong to their owners.
 
-> **Experimental parts.** Some features here are **beta**: the second core (`chip/fm1_cpu1.*`) and expanded flash
-> (`chip/fm1_flash_ext.h`). USB MIDI host is ported from Melodee, where input has run on hardware;
+> **Experimental parts.** Some features here are **beta**: the second core (`chip/fm1_cpu1.*`), expanded flash
+> (`chip/fm1_flash_ext.h`) and the cache RAM (`chip/fm1_cache_ram.h`). USB MIDI host is ported from Melodee, where input has run on hardware;
 > this BSP port and its OUT path still need device validation. A higher clock remains a **concept**.
 > What is established and what is not: [docs/EXPERIMENTAL.md](docs/EXPERIMENTAL.md). The safe test
 > firmware (`examples/hwtest/hwtest.bin`) contains none of them. Bluetooth MIDI and WiFi, on JieLi's own
@@ -35,6 +35,7 @@ belong to their owners.
 | Device | Status |
 | --- | --- |
 | M-VAVE FM-1 | Supported. Used by Felucca. |
+| M-VAVE Galaxia | Supported (board code: audio, knobs, switches, jacks, LED). Used by [GalaxiaSDK](https://github.com/dhilowitz/GalaxiaSDK). |
 | M-VAVE SMK-37 Elite | Planned. Not started. |
 | M-VAVE SMK-37 Pro | Planned. No board support yet. |
 
@@ -51,8 +52,11 @@ when they have been checked on a real unit.
 | `chip/usb.c` | The USB device: MIDI, serial and audio classes (audio in, and with `FELUCCA_UAC_OUT` audio out) with the EP0 and poll code |
 | `chip/fm1_sys.h`, `chip/fm1_guard.h` | Supply rails (VDC14 and SYSVDD at M-VAVE's levels), reboot and core reset; hardware guards (stack, write and fetch limits that end in the fault report), the stack floor, whether code runs in an interrupt |
 | `loader/` | The update loader (builds as a RAM image; it includes `chip/usb.c`, `chip/ota.c` and `chip/libc.c`) |
-| `boards/fm1/` | FM-1 wiring and drivers: LCD pins, key scan (with velocity and pressure from the keys, off by default: `fm1_input.h`), ADC channels, audio codec lines |
+| `boards/fm1/` | FM-1 wiring and drivers: ST7789 panel initialization and RGB565 transfers (`fm1_lcd.h`), key scan (with velocity and pressure from the keys, off by default: `fm1_input.h`), ADC channels, checked stereo Q23 audio DMA (`fm1_audio.h`), the headphone jack's switch (PB5: `fm1_jack.h`) |
+| `boards/galaxia/` | Galaxia (a guitar pedal, board PD49 V03) wiring and drivers in one header, `gx_board.h`: the stereo converter on ALNK0 (44,118 Hz), six knobs including a nine-detent selector, two footswitches, the input jack detects, the two-colour LED |
+| `docs/BOARD_IO.md` | Panel API, pixel byte order and lifetime; audio sample/rate guarantees, buffer validation, stop/restart and underrun behavior |
 | `docs/EXPERIMENTAL.md` | Second core, expanded flash, USB host, clock: what is established and what is not |
+| `docs/FLASH.md` | Application write regions, flash API, interrupt preservation, CPU1 coordination and verification |
 | `docs/CPU.md` | What the CPU has been seen to do: 64-bit multiplies among 16-bit loads leave a register a bit off; keep them out of line |
 | `tools/` | Package builder (`fm1pkg.py`), USB-MIDI installer (`fm1_install.py`), `fm1_rescue` and `get_sdk.sh` (JieLi's SDK, fetched and checked by hash) |
 | `examples/hwtest/` | Test firmware for a real FM-1: screen, knob, buttons, LEDs, USB serial. `hwtest.bin` is the safe image; `hwtest-exp.bin` adds the experimental parts |
